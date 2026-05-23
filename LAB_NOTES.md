@@ -15,6 +15,63 @@ The current firmware runs a two-way heartbeat test:
 
 The EBYTE E32-900T20D is a UART transparent-transmission LoRa module. Based on the available E32-900T20D documentation reviewed during Phase 1, this module does not appear to expose per-packet RSSI over the transparent UART interface.
 
+Newer EBYTE E32-xxxT20x V8.2 documentation lists AT commands for RSSI-related settings:
+
+- `AT+DRSSI=data_rssi`
+- `AT+DRSSI=1`
+- `AT+DRSSI=?`
+- `AT+ERSSI=erssi`
+- `AT+ERSSI=1`
+- `AT+ERSSI=?`
+
+These commands were tested experimentally with both project E32-900T20D modules in configuration / sleep mode, with M0 and M1 tied HIGH to 3.3V. Both modules responded to AT traffic, but both rejected the RSSI commands with ERR-style responses.
+
+Observed Seeker-side module result:
+
+```text
+AT+HELP=? -> produced response, but did not list AT+DRSSI or AT+ERSSI
+AT+DRSSI=? -> =ERR
+AT+DRSSI=1 -> =ERR
+AT+ERSSI=? -> =ERR
+AT+ERSSI=1 -> =ERR
+```
+
+The Seeker-side `AT+HELP=?` command listed:
+
+```text
+AT+DEVTYPE
+AT+FWCODE
+AT+UART
+AT+RATE
+AT+PACKET
+AT+POWER
+AT+TRANS
+AT+ADDR
+AT+CHANNEL
+AT+IAP
+AT+RESET
+AT+SWITCH
+AT+DEFAULT
+AT+URXT
+AT+AUXISIP
+AT+WTIME
+AT+FEC
+AT+IODRIVE
+AT+DUTYTX
+AT+UAUX
+```
+
+Observed Hider-side module result:
+
+```text
+AT+DRSSI=? -> =ERR
+AT+DRSSI=1 -> =ERR
+AT+ERSSI=? -> =ERR
+AT+ERSSI=1 -> =ERR
+```
+
+Conclusion for the current modules: do not assume received-data RSSI is available. The current E32-900T20D modules did not accept `AT+DRSSI=1` during this test.
+
 Because of that, the current Seeker firmware prints:
 
 ```text
