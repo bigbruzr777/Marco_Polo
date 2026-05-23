@@ -14,24 +14,54 @@
 // D11 sends data to the LoRa module.
 SoftwareSerial loraSerial(10, 11);
 
+// Optional diagnostic wiring:
+//   E32 AUX -> Arduino D4
+//
+// AUX is HIGH when the E32 module is ready.
+// AUX is LOW when the E32 module is busy sending, receiving, or starting up.
+const int LORA_AUX_PIN = 4;
+
 String incomingPacket = "";
 unsigned long lastStatusTime = 0;
+int lastAuxState = HIGH;
+
+String auxStateText() {
+  if (digitalRead(LORA_AUX_PIN) == HIGH) {
+    return "HIGH/READY";
+  }
+
+  return "LOW/BUSY";
+}
 
 void setup() {
   // USB Serial Monitor for messages to the computer.
   Serial.begin(9600);
+
+  // INPUT_PULLUP keeps D4 from floating if AUX is not connected yet.
+  pinMode(LORA_AUX_PIN, INPUT_PULLUP);
+  lastAuxState = digitalRead(LORA_AUX_PIN);
 
   // Serial link between the Arduino and the E32 LoRa module.
   loraSerial.begin(9600);
 
   Serial.println("MarcoPolo Seeker starting...");
   Serial.println("Waiting for LoRa packets...");
+  Serial.print("AUX pin D4 state: ");
+  Serial.println(auxStateText());
 }
 
 void loop() {
+  int auxState = digitalRead(LORA_AUX_PIN);
+  if (auxState != lastAuxState) {
+    Serial.print("AUX changed: ");
+    Serial.println(auxStateText());
+    lastAuxState = auxState;
+  }
+
   // Print a slow heartbeat so the Serial Monitor shows the sketch is running.
   if (millis() - lastStatusTime >= 5000) {
-    Serial.println("Waiting...");
+    Serial.print("Waiting... AUX=");
+    Serial.println(auxStateText());
     lastStatusTime = millis();
   }
 

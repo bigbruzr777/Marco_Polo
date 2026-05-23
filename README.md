@@ -18,6 +18,7 @@ Use this wiring on both Arduino Uno boards:
 | --- | --- |
 | TXD | D10 |
 | RXD | D11 through a voltage divider |
+| AUX | D4, optional but recommended for diagnostics |
 | M0 | GND |
 | M1 | GND |
 | VCC | Correct module supply voltage |
@@ -27,6 +28,7 @@ The code uses `SoftwareSerial loraSerial(10, 11);`.
 
 - Arduino D10 is SoftwareSerial RX and receives from E32 TXD.
 - Arduino D11 is SoftwareSerial TX and sends to E32 RXD through a voltage divider.
+- Arduino D4 can read E32 AUX. AUX is HIGH when the module is ready and LOW when it is busy.
 - The serial baud rate is 9600.
 
 ## Upload the Hider
@@ -98,10 +100,20 @@ Received: HIDER01,TEST,PKT=1
 Received: HIDER01,TEST,PKT=2
 ```
 
+With AUX wired to D4, the monitors also print AUX diagnostics:
+
+```text
+AUX pin D4 state: HIGH/READY
+Waiting... AUX=HIGH/READY
+```
+
 ## Troubleshooting Checklist
 
 - Confirm both E32 modules have matching settings and are on the same channel.
 - Confirm both E32 modules are in normal mode: M0 to GND and M1 to GND.
+- Wire AUX to Arduino D4 on both boards and check that it reads `HIGH/READY` most of the time.
+- If AUX stays `LOW/BUSY`, check module power, M0/M1 mode wiring, and whether the module is stuck starting up.
+- If the Hider says `busy pulse seen: NO`, the E32 may not be seeing serial data from Arduino D11.
 - Confirm E32 TXD goes to Arduino D10.
 - Confirm Arduino D11 goes through a voltage divider to E32 RXD.
 - Confirm all grounds are connected together.
