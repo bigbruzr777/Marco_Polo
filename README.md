@@ -10,6 +10,24 @@ Phase 1 only proves that two EBYTE E32-900T20D LoRa modules can communicate thro
 
 The current test firmware is a two-way heartbeat test. The Hider sends near the start of each 4 second cycle, and the Seeker sends about 2 seconds later. Both boards listen between their transmit slots.
 
+The Hider now uses a simple MarcoPolo packet format:
+
+```text
+MP1,HIDER01,BEACON,SEQ=1,MS=12345,TXP=20,FLAGS=OK
+```
+
+This format gives the Seeker stable fields for later hotter/colder tracking:
+
+- `MP1`: MarcoPolo packet format version 1
+- `HIDER01`: transmitting tag ID
+- `BEACON`: packet type
+- `SEQ`: increasing packet number
+- `MS`: Hider uptime in milliseconds
+- `TXP`: configured transmit power in dBm
+- `FLAGS`: simple status text
+
+The E32-900T20D UART module does not expose per-packet RSSI in transparent serial mode, so the Seeker currently prints `rssi=NA` and tracks proxy metrics: packets heard, packets missed, and age of the last Hider packet.
+
 This phase does not use GPS, TinyML, dashboards, RSSI tracking, or complex packet parsing.
 
 ## Wiring Summary
@@ -91,19 +109,16 @@ Replace `COM3` with the correct port for that board.
 Hider Serial Monitor:
 
 ```text
-TX: HIDER01,HEARTBEAT,PKT=1
-RX: SEEKER01,HEARTBEAT,PKT=1
-TX: HIDER01,HEARTBEAT,PKT=2
-RX: SEEKER01,HEARTBEAT,PKT=2
+TX: MP1,HIDER01,BEACON,SEQ=1,MS=12345,TXP=20,FLAGS=OK
+RX: MP1,SEEKER01,STATUS,SEQ=1,MS=14000,LAST_HIDER_SEQ=1,FLAGS=OK
 ```
 
 Seeker Serial Monitor:
 
 ```text
-RX: HIDER01,HEARTBEAT,PKT=1
-TX: SEEKER01,HEARTBEAT,PKT=1
-RX: HIDER01,HEARTBEAT,PKT=2
-TX: SEEKER01,HEARTBEAT,PKT=2
+RX: MP1,HIDER01,BEACON,SEQ=1,MS=12345,TXP=20,FLAGS=OK
+TRACK HIDER01 seq=1 heard=1 missed=0 age_ms=0 hider_ms=12345 rssi=NA
+TX: MP1,SEEKER01,STATUS,SEQ=1,MS=14000,LAST_HIDER_SEQ=1,FLAGS=OK
 ```
 
 With AUX wired to D4, the monitors also print AUX diagnostics:

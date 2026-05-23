@@ -69,7 +69,14 @@ void readLoRaPackets() {
 }
 
 void sendHeartbeat() {
-  String packet = "HIDER01,HEARTBEAT,PKT=" + String(packetNumber);
+  // MarcoPolo packet format v1:
+  //   MP1,SOURCE,TYPE,SEQ=n,MS=n,TXP=n,FLAGS=text
+  //
+  // RSSI is not included because the E32 UART module does not expose
+  // per-packet RSSI in transparent serial mode.
+  String packet = "MP1,HIDER01,BEACON,SEQ=" + String(packetNumber) +
+                  ",MS=" + String(millis()) +
+                  ",TXP=20,FLAGS=OK";
   bool auxWasBusy = false;
 
   Serial.print("TX AUX before: ");

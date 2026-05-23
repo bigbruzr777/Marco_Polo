@@ -28,6 +28,10 @@ String incomingPacket = "";
 unsigned long packetNumber = 1;
 unsigned long lastTxCycle = 999999;
 unsigned long lastStatusTime = 0;
+unsigned long lastHiderSeq = 0;
+unsigned long hiderPacketsHeard = 0;
+unsigned long hiderPacketsMissed = 0;
+unsigned long lastHiderPacketMs = 0;
 int lastAuxState = HIGH;
 
 String auxStateText() {
@@ -44,6 +48,53 @@ void printPacket(String direction, String packet) {
   Serial.println(packet);
 }
 
+String getFieldValue(String packet, String fieldName) {
+  String searchText = fieldName + "=";
+  int fieldStart = packet.indexOf(searchText);
+
+  if (fieldStart < 0) {
+    return "";
+  }
+
+  fieldStart += searchText.length();
+  int fieldEnd = packet.indexOf(',', fieldStart);
+
+  if (fieldEnd < 0) {
+    fieldEnd = packet.length();
+  }
+
+  return packet.substring(fieldStart, fieldEnd);
+}
+
+void updateHiderTracking(String packet) {
+  if (!packet.startsWith("MP1,HIDER01,BEACON,")) {
+    return;
+  }
+
+  unsigned long sequenceNumber = getFieldValue(packet, "SEQ").toInt();
+  unsigned long hiderMillis = getFieldValue(packet, "MS").toInt();
+
+  hiderPacketsHeard++;
+  lastHiderPacketMs = millis();
+
+  if (lastHiderSeq > 0 && sequenceNumber > lastHiderSeq + 1) {
+    hiderPacketsMissed += sequenceNumber - lastHiderSeq - 1;
+  }
+
+  lastHiderSeq = sequenceNumber;
+
+  Serial.print("TRACK HIDER01 seq=");
+  Serial.print(sequenceNumber);
+  Serial.print(" heard=");
+  Serial.print(hiderPacketsHeard);
+  Serial.print(" missed=");
+  Serial.print(hiderPacketsMissed);
+  Serial.print(" age_ms=0");
+  Serial.print(" hider_ms=");
+  Serial.print(hiderMillis);
+  Serial.println(" rssi=NA");
+}
+
 void readLoRaPackets() {
   while (loraSerial.available() > 0) {
     char receivedChar = loraSerial.read();
@@ -55,6 +106,7 @@ void readLoRaPackets() {
 
       if (packet.length() > 0) {
         printPacket("RX", packet);
+        updateHiderTracking(packet);
       }
     } else {
       incomingPacket += receivedChar;
@@ -69,7 +121,12 @@ void readLoRaPackets() {
 }
 
 void sendHeartbeat() {
-  String packet = "SEEKER01,HEARTBEAT,PKT=" + String(packetNumber);
+  // MarcoPolo packet format v1:
+  //   MP1,SOURCE,TYPE,SEQ=n,MS=n,LAST_HIDER_SEQ=n,FLAGS=text
+  String packet = "MP1,SEEKER01,STATUS,SEQ=" + String(packetNumber) +
+                  ",MS=" + String(millis()) +
+                  ",LAST_HIDER_SEQ=" + String(lastHiderSeq) +
+                  ",FLAGS=OK";
   bool auxWasBusy = false;
 
   Serial.print("TX AUX before: ");
@@ -134,7 +191,20 @@ void loop() {
 
   if (now - lastStatusTime >= 5000) {
     Serial.print("Listening... AUX=");
-    Serial.println(auxStateText());
+    Serial.print(auxStateText());
+
+    if (lastHiderPacketMs > 0) {
+      Serial.print(" last_hider_age_ms=");
+      Serial.print(now - lastHiderPacketMs);
+      Serial.print(" heard=");
+      Serial.print(hiderPacketsHeard);
+      Serial.print(" missed=");
+      Serial.print(hiderPacketsMissed);
+    } else {
+      Serial.print(" last_hider_age_ms=NA heard=0 missed=0");
+    }
+
+    Serial.println(" rssi=NA");
     lastStatusTime = now;
   }
 }
