@@ -8,6 +8,8 @@ MarcoPolo is a low-cost Industry 4.0 asset tracking and recovery prototype. The 
 
 Phase 1 only proves that two EBYTE E32-900T20D LoRa modules can communicate through two Arduino Uno R3 boards over serial.
 
+The current test firmware is a two-way heartbeat test. The Hider sends near the start of each 4 second cycle, and the Seeker sends about 2 seconds later. Both boards listen between their transmit slots.
+
 This phase does not use GPS, TinyML, dashboards, RSSI tracking, or complex packet parsing.
 
 ## Wiring Summary
@@ -89,15 +91,19 @@ Replace `COM3` with the correct port for that board.
 Hider Serial Monitor:
 
 ```text
-Sent: HIDER01,TEST,PKT=1
-Sent: HIDER01,TEST,PKT=2
+TX: HIDER01,HEARTBEAT,PKT=1
+RX: SEEKER01,HEARTBEAT,PKT=1
+TX: HIDER01,HEARTBEAT,PKT=2
+RX: SEEKER01,HEARTBEAT,PKT=2
 ```
 
 Seeker Serial Monitor:
 
 ```text
-Received: HIDER01,TEST,PKT=1
-Received: HIDER01,TEST,PKT=2
+RX: HIDER01,HEARTBEAT,PKT=1
+TX: SEEKER01,HEARTBEAT,PKT=1
+RX: HIDER01,HEARTBEAT,PKT=2
+TX: SEEKER01,HEARTBEAT,PKT=2
 ```
 
 With AUX wired to D4, the monitors also print AUX diagnostics:

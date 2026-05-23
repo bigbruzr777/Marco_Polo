@@ -1,11 +1,12 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 
-// MarcoPolo Phase 1 - Hider / transmitter
+// MarcoPolo Phase 1 - Hider two-way LoRa heartbeat test
 //
 // Wiring for the EBYTE E32 module:
 //   E32 TXD -> Arduino D10
 //   Arduino D11 -> voltage divider -> E32 RXD
+//   E32 AUX -> Arduino D4
 //   E32 M0  -> GND
 //   E32 M1  -> GND
 //
@@ -14,14 +15,20 @@
 // D11 sends data to the LoRa module.
 SoftwareSerial loraSerial(10, 11);
 
-// Optional diagnostic wiring:
-//   E32 AUX -> Arduino D4
-//
-// AUX is HIGH when the E32 module is ready.
-// AUX is LOW when the E32 module is busy sending, receiving, or starting up.
 const int LORA_AUX_PIN = 4;
 
+// Both boards use the same 4 second cycle.
+// Hider sends near the start of the cycle.
+// Seeker sends about 2 seconds later.
+const unsigned long CYCLE_MS = 4000;
+const unsigned long MY_TX_OFFSET_MS = 0;
+const unsigned long TX_WINDOW_MS = 250;
+
+String incomingPacket = "";
 unsigned long packetNumber = 1;
+unsigned long lastTxCycle = 999999;
+unsigned long lastStatusTime = 0;
+int lastAuxState = HIGH;
 
 String auxStateText() {
   if (digitalRead(LORA_AUX_PIN) == HIGH) {
@@ -31,49 +38,103 @@ String auxStateText() {
   return "LOW/BUSY";
 }
 
-void setup() {
-  // USB Serial Monitor for messages to the computer.
-  Serial.begin(9600);
-
-  // INPUT_PULLUP keeps D4 from floating if AUX is not connected yet.
-  pinMode(LORA_AUX_PIN, INPUT_PULLUP);
-
-  // Serial link between the Arduino and the E32 LoRa module.
-  loraSerial.begin(9600);
-
-  Serial.println("MarcoPolo Hider starting...");
-  Serial.println("Sending one test packet every 2 seconds.");
-  Serial.print("AUX pin D4 state: ");
-  Serial.println(auxStateText());
+void printPacket(String direction, String packet) {
+  Serial.print(direction);
+  Serial.print(": ");
+  Serial.println(packet);
 }
 
-void loop() {
-  // Build a simple text packet. No GPS, TinyML, or parsing yet.
-  String packet = "HIDER01,TEST,PKT=" + String(packetNumber);
+void readLoRaPackets() {
+  while (loraSerial.available() > 0) {
+    char receivedChar = loraSerial.read();
 
+    if (receivedChar == '\n') {
+      String packet = incomingPacket;
+      packet.trim();
+      incomingPacket = "";
+
+      if (packet.length() > 0) {
+        printPacket("RX", packet);
+      }
+    } else {
+      incomingPacket += receivedChar;
+    }
+
+    if (incomingPacket.length() > 80) {
+      Serial.print("RX buffer cleared: ");
+      Serial.println(incomingPacket);
+      incomingPacket = "";
+    }
+  }
+}
+
+void sendHeartbeat() {
+  String packet = "HIDER01,HEARTBEAT,PKT=" + String(packetNumber);
   bool auxWasBusy = false;
 
-  // Send the packet over LoRa.
+  Serial.print("TX AUX before: ");
+  Serial.println(auxStateText());
+
   loraSerial.println(packet);
 
-  // Watch AUX briefly after sending. A LOW pulse means the E32 accepted work.
+  // Watch AUX briefly after sending. A LOW pulse suggests the E32 accepted work.
   unsigned long watchStart = millis();
-  while (millis() - watchStart < 200) {
+  while (millis() - watchStart < 300) {
+    readLoRaPackets();
+
     if (digitalRead(LORA_AUX_PIN) == LOW) {
       auxWasBusy = true;
     }
   }
 
-  // Also print the packet to the USB Serial Monitor.
-  Serial.print("Sent: ");
-  Serial.println(packet);
-  Serial.print("AUX after send: ");
+  printPacket("TX", packet);
+  Serial.print("TX AUX after: ");
   Serial.print(auxStateText());
   Serial.print(" busy pulse seen: ");
   Serial.println(auxWasBusy ? "YES" : "NO");
 
   packetNumber++;
+}
 
-  // Wait 2 seconds before sending the next packet.
-  delay(2000);
+void setup() {
+  Serial.begin(9600);
+  pinMode(LORA_AUX_PIN, INPUT_PULLUP);
+  lastAuxState = digitalRead(LORA_AUX_PIN);
+
+  loraSerial.begin(9600);
+
+  Serial.println("MarcoPolo Hider two-way test starting...");
+  Serial.println("Hider TX slot: start of each 4 second cycle.");
+  Serial.println("Listening between Hider TX slots.");
+  Serial.print("AUX pin D4 state: ");
+  Serial.println(auxStateText());
+}
+
+void loop() {
+  readLoRaPackets();
+
+  int auxState = digitalRead(LORA_AUX_PIN);
+  if (auxState != lastAuxState) {
+    Serial.print("AUX changed: ");
+    Serial.println(auxStateText());
+    lastAuxState = auxState;
+  }
+
+  unsigned long now = millis();
+  unsigned long cycleNumber = now / CYCLE_MS;
+  unsigned long cyclePosition = now % CYCLE_MS;
+
+  bool inMyTxWindow = cyclePosition >= MY_TX_OFFSET_MS &&
+                      cyclePosition < (MY_TX_OFFSET_MS + TX_WINDOW_MS);
+
+  if (inMyTxWindow && cycleNumber != lastTxCycle) {
+    sendHeartbeat();
+    lastTxCycle = cycleNumber;
+  }
+
+  if (now - lastStatusTime >= 5000) {
+    Serial.print("Listening... AUX=");
+    Serial.println(auxStateText());
+    lastStatusTime = now;
+  }
 }
