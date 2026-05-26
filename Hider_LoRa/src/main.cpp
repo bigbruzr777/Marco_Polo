@@ -3,22 +3,19 @@
 #include <SoftwareSerial.h>
 #include <TinyGPSPlus.h>
 
-// MarcoPolo GPS Hider
-//
-// E32 LoRa wiring:
+// MarcoPolo GPS Hider.
+// E32:
 //   E32 TXD -> Arduino D10
 //   Arduino D11 -> resistor divider -> E32 RXD
 //   E32 AUX -> Arduino D4
 //   E32 M0  -> GND
 //   E32 M1  -> GND
-//
-// GPS wiring:
+// GPS:
 //   GPS VCC -> 5V rail
 //   GPS GND -> GND rail
 //   GPS TX  -> Arduino D8
 //   GPS RX is not connected
-//
-// Serial links:
+// Serial:
 //   USB Serial Monitor: 115200 baud
 //   E32 UART:           9600 baud
 //   GPS UART:           9600 baud

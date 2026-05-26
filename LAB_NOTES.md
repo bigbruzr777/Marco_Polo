@@ -1,162 +1,113 @@
 # MarcoPolo Lab Notes
 
-## Phase 1 Status
+## Current Status
 
-Phase 1 communication between the two Arduino Uno R3 boards and EBYTE E32-900T20D LoRa modules is working.
+- Two Arduino Uno boards talk through EBYTE E32-900T20D modules.
+- Hider reads GPS on D8 and sends a LoRa line every 2 seconds.
+- Seeker reads its GPS on D8, receives Hider packets, and prints both positions.
+- USB Serial is 115200. E32 and GPS are 9600.
 
-The current firmware runs a GPS-over-LoRa test:
-
-- Hider reads GPS with TinyGPSPlus over AltSoftSerial on Arduino D8.
-- Hider transmits one compact LoRa GPS packet every 2 seconds.
-- Seeker reads its own GPS with TinyGPSPlus over AltSoftSerial on Arduino D8.
-- Seeker receives Hider GPS packets over the E32 LoRa link.
-- Seeker prints both locations to the USB Serial Monitor at 115200 baud.
-
-Current Hider packet format:
+Hider packet:
 
 ```text
 HIDER,<fix>,<lat>,<lon>,<sats>,<hdop>
 ```
 
-Example with fix:
+Examples:
 
 ```text
 HIDER,1,30.421234,-87.216789,8,1.25
-```
-
-Example without fix:
-
-```text
 HIDER,0,0,0,3,0
 ```
 
-## RSSI Notes
+## Wiring Notes
 
-The EBYTE E32-900T20D is a UART transparent-transmission LoRa module. Based on the available E32-900T20D documentation reviewed during Phase 1, this module does not appear to expose per-packet RSSI over the transparent UART interface.
+E32:
 
-Newer EBYTE E32-xxxT20x V8.2 documentation lists AT commands for RSSI-related settings:
+- M0 = GND
+- M1 = GND
+- E32 TXD -> Arduino D10
+- Arduino D11 -> divider -> E32 RXD
+- AUX -> Arduino D4
 
-- `AT+DRSSI=data_rssi`
-- `AT+DRSSI=1`
-- `AT+DRSSI=?`
-- `AT+ERSSI=erssi`
-- `AT+ERSSI=1`
-- `AT+ERSSI=?`
+GPS:
 
-These commands were tested experimentally with both project E32-900T20D modules in configuration / sleep mode, with M0 and M1 tied HIGH to 3.3V. Both modules responded to AT traffic, but both rejected the RSSI commands with ERR-style responses.
+- GPS VCC -> 5V rail
+- GPS GND -> GND rail
+- GPS TX -> Arduino D8
+- GPS RX not connected
 
-Observed Seeker-side module result:
+## Voltage Divider Fix
 
-```text
-AT+HELP=? -> produced response, but did not list AT+DRSSI or AT+ERSSI
-AT+DRSSI=? -> =ERR
-AT+DRSSI=1 -> =ERR
-AT+ERSSI=? -> =ERR
-AT+ERSSI=1 -> =ERR
-```
-
-The Seeker-side `AT+HELP=?` command listed:
+The first E32 RX divider was backwards:
 
 ```text
-AT+DEVTYPE
-AT+FWCODE
-AT+UART
-AT+RATE
-AT+PACKET
-AT+POWER
-AT+TRANS
-AT+ADDR
-AT+CHANNEL
-AT+IAP
-AT+RESET
-AT+SWITCH
-AT+DEFAULT
-AT+URXT
-AT+AUXISIP
-AT+WTIME
-AT+FEC
-AT+IODRIVE
-AT+DUTYTX
-AT+UAUX
+D11 -> 2k -> E32 RX
+E32 RX -> 1k -> GND
 ```
 
-Observed Hider-side module result:
-
-```text
-AT+DRSSI=? -> =ERR
-AT+DRSSI=1 -> =ERR
-AT+ERSSI=? -> =ERR
-AT+ERSSI=1 -> =ERR
-```
-
-Conclusion for the current modules: do not assume received-data RSSI is available. The current E32-900T20D modules did not accept `AT+DRSSI=1` during this test.
-
-Because of that, the current Seeker firmware prints:
-
-```text
-rssi=NA
-```
-
-For Phase 1 and early foxhunt-style testing, the Seeker uses proxy tracking metrics instead:
-
-- `heard`: number of Hider beacon packets received
-- `missed`: sequence gaps between Hider packets
-- `last_hider_age_ms`: time since the last received Hider packet
-- packet receive consistency over time
-
-These metrics can support a rough hotter/colder search pattern, but they are not equivalent to true RSSI. For real RSSI-based direction or distance estimation in a later phase, the project will likely need one of these options:
-
-- a LoRa radio/module and library that exposes raw SX127x RSSI values, such as an SPI SX1276/RFM95-style board
-- an EBYTE UART module model that explicitly supports RSSI reporting
-- a separate receiver/radio path dedicated to signal-strength measurements
-
-## E32 LoRa RX Voltage Divider Fix
-
-When wiring the E32 LoRa module to an Arduino Uno R3, the Arduino D11 TX signal is 5V logic, but the E32 RX input should not be driven directly with 5V. EBYTE documentation warns that 5V communication lines can risk damage, and other E32 Arduino guides recommend using a voltage divider or level shifter for the module RX line.
-
-The original divider had the resistor values reversed:
-
-```text
-Arduino D11 -> 2k ohm -> E32 RX
-E32 RX -> 1k ohm -> GND
-```
-
-That only produces about 1.67V:
+That made about 1.67V:
 
 ```text
 5V x (1k / (2k + 1k)) = 1.67V
 ```
 
-The corrected divider is:
+Correct divider:
 
 ```text
-Arduino D11 -> 1k ohm -> E32 RX
-E32 RX -> 2k ohm -> GND
+D11 -> 1k -> E32 RX
+E32 RX -> 2k -> GND
 ```
 
-That produces about 3.33V:
+That makes about 3.33V:
 
 ```text
 5V x (2k / (1k + 2k)) = 3.33V
 ```
 
-Final breadboard fix:
+Breadboard fix:
 
-- Arduino D11 jumper goes to F20.
-- 1k ohm resistor goes from G20 to G26.
-- 2k ohm resistor goes from H26 to right - rail.
-- E32 RX remains at J26.
+- D11 jumper to F20
+- 1k from G20 to G26
+- 2k from H26 to right - rail
+- E32 RX at J26
 
-Because row 26 on the right side connects F26-G26-H26-I26-J26, row 26 becomes the safe 3.3V-ish signal node feeding E32 RX.
+After the fix, AUX showed transmit activity and the Seeker received packets.
 
-After this resistor fix, both boards showed successful E32 AUX transmit activity:
+## RSSI Notes
 
-```text
-TX AUX after: HIGH/READY busy pulse seen: YES
-```
+The current E32-900T20D modules do not give us usable RSSI in this setup.
 
-The Seeker also began receiving Hider packets:
+We tested newer documented commands with M0/M1 HIGH:
 
 ```text
-RX: MP1,HIDER01,BEACON,...
+AT+DRSSI=?
+AT+DRSSI=1
+AT+ERSSI=?
+AT+ERSSI=1
 ```
+
+Both modules returned ERR. The Seeker module's `AT+HELP=?` response did not list DRSSI or ERSSI.
+
+Current firmware prints:
+
+```text
+rssi=NA
+```
+
+For hotter/colder later, use packet age, missed packets, GPS distance, or switch to an SPI LoRa radio/library that exposes packet RSSI.
+
+## Sources
+
+Low-effort links used or useful for this project:
+
+- PlatformIO Arduino Uno board setup: https://docs.platformio.org/en/latest/boards/atmelavr/uno.html
+- Arduino SoftwareSerial: https://docs.arduino.cc/tutorials/communication/SoftwareSerialExample
+- TinyGPSPlus GPS parser: https://github.com/mikalhart/TinyGPSPlus
+- AltSoftSerial GPS serial on Uno D8/D9: https://github.com/PaulStoffregen/AltSoftSerial
+- E32-900T20D manual, pins, AUX, modes: https://www.manualslib.com/manual/3752089/Ebyte-E32-900t20d.html
+- E32-900T20D PDF mirror: https://e-gizmo.net/oc/kits%20documents/Wireless%20Modules/E32-900T20D.pdf
+- E32 V8.2 manual with DRSSI/ERSSI commands: https://robu.in/wp-content/uploads/2024/07/E32-xxxT20x-V8.2_UserManual_EN_V1.0.pdf
+- Voltage divider math: https://polluxlabs.io/knowledge/electronics-basics/understanding-voltage-dividers
+- 5V to 3.3V divider example: https://zbotic.in/logic-level-shifter-5v-to-3-3v-and-back-conversion-guide/
+- Future RSSI option, RadioLib SX1276 `getRSSI()`: https://jgromes.github.io/RadioLib/class_s_x1276.html
