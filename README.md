@@ -6,29 +6,34 @@ MarcoPolo is a low-cost Industry 4.0 asset tracking and recovery prototype. The 
 
 ## Phase 1 Goal
 
-Phase 1 only proves that two EBYTE E32-900T20D LoRa modules can communicate through two Arduino Uno R3 boards over serial.
+Phase 1 proves that two EBYTE E32-900T20D LoRa modules can communicate through two Arduino Uno R3 boards over serial. The current firmware also adds a first GPS-over-LoRa test.
 
-The current test firmware is a two-way heartbeat test. The Hider sends near the start of each 4 second cycle, and the Seeker sends about 2 seconds later. Both boards listen between their transmit slots.
+The current test firmware sends Hider GPS status over LoRa every 2 seconds. The Seeker reads its own GPS and prints both Seeker and Hider locations.
 
-The Hider now uses a simple MarcoPolo packet format:
+The Hider uses a compact plain ASCII packet:
 
 ```text
-MP1,HIDER01,BEACON,SEQ=1,MS=12345,TXP=20,FLAGS=OK
+HIDER,1,30.421234,-87.216789,8,1.25
 ```
 
-This format gives the Seeker stable fields for later hotter/colder tracking:
+Fields:
 
-- `MP1`: MarcoPolo packet format version 1
-- `HIDER01`: transmitting tag ID
-- `BEACON`: packet type
-- `SEQ`: increasing packet number
-- `MS`: Hider uptime in milliseconds
-- `TXP`: configured transmit power in dBm
-- `FLAGS`: simple status text
+- `HIDER`: packet source
+- `1` or `0`: GPS fix valid flag
+- latitude
+- longitude
+- satellite count
+- HDOP
 
-The E32-900T20D UART module does not expose per-packet RSSI in transparent serial mode, so the Seeker currently prints `rssi=NA` and tracks proxy metrics: packets heard, packets missed, and age of the last Hider packet.
+If the Hider has no GPS fix yet, it sends:
 
-This phase does not use GPS, TinyML, dashboards, RSSI tracking, or complex packet parsing.
+```text
+HIDER,0,0,0,3,0
+```
+
+The E32-900T20D UART module did not accept RSSI-related AT commands during testing, so the Seeker currently prints `rssi=NA`.
+
+This phase does not use TinyML, dashboards, or complex packet parsing.
 
 ## Wiring Summary
 
@@ -49,7 +54,21 @@ The code uses `SoftwareSerial loraSerial(10, 11);`.
 - Arduino D10 is SoftwareSerial RX and receives from E32 TXD.
 - Arduino D11 is SoftwareSerial TX and sends to E32 RXD through a voltage divider.
 - Arduino D4 can read E32 AUX. AUX is HIGH when the module is ready and LOW when it is busy.
-- The serial baud rate is 9600.
+- The E32 serial baud rate is 9600.
+
+GPS wiring on both boards:
+
+| GPS Pin | Arduino Uno Pin |
+| --- | --- |
+| VCC | 5V rail |
+| GND | GND rail |
+| TX | D8 |
+| RX | Not connected |
+
+The code uses AltSoftSerial for GPS. On Arduino Uno, AltSoftSerial uses RX on D8 and TX on D9. GPS RX is not used in this phase.
+
+- USB Serial Monitor baud rate is 115200.
+- GPS baud rate is 9600.
 
 ## Upload the Hider
 
@@ -109,16 +128,29 @@ Replace `COM3` with the correct port for that board.
 Hider Serial Monitor:
 
 ```text
-TX: MP1,HIDER01,BEACON,SEQ=1,MS=12345,TXP=20,FLAGS=OK
-RX: MP1,SEEKER01,STATUS,SEQ=1,MS=14000,LAST_HIDER_SEQ=1,FLAGS=OK
+--- MarcoPolo Hider GPS ---
+GPS fix status: FIX
+Lat/Lon: 30.421234, -87.216789
+GPS sats: 8
+GPS hdop: 1.25
+Packet sent: HIDER,1,30.421234,-87.216789,8,1.25
 ```
 
 Seeker Serial Monitor:
 
 ```text
-RX: MP1,HIDER01,BEACON,SEQ=1,MS=12345,TXP=20,FLAGS=OK
-TRACK HIDER01 seq=1 heard=1 missed=0 age_ms=0 hider_ms=12345 rssi=NA
-TX: MP1,SEEKER01,STATUS,SEQ=1,MS=14000,LAST_HIDER_SEQ=1,FLAGS=OK
+--- MarcoPolo GPS Test ---
+Seeker GPS: FIX
+Seeker Lat/Lon: 30.421000, -87.216500
+Seeker sats: 9
+
+Hider GPS: FIX
+Hider Lat/Lon: 30.421234, -87.216789
+Hider sats: 8
+Hider packet age: 0.5s
+Raw last Hider packet: HIDER,1,30.421234,-87.216789,8,1.25
+rssi=NA
+--------------------------
 ```
 
 With AUX wired to D4, the monitors also print AUX diagnostics:
@@ -132,6 +164,9 @@ Waiting... AUX=HIGH/READY
 
 - Confirm both E32 modules have matching settings and are on the same channel.
 - Confirm both E32 modules are in normal mode: M0 to GND and M1 to GND.
+- Confirm GPS TX goes to Arduino D8.
+- Confirm GPS VCC, GND, and antenna placement.
+- GPS may take several minutes to get a first fix, especially indoors. `NOFIX` with a satellite count still means GPS serial parsing may be working.
 - Wire AUX to Arduino D4 on both boards and check that it reads `HIGH/READY` most of the time.
 - If AUX stays `LOW/BUSY`, check module power, M0/M1 mode wiring, and whether the module is stuck starting up.
 - If the Hider says `busy pulse seen: NO`, the E32 may not be seeing serial data from Arduino D11.

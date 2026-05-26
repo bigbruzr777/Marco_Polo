@@ -1,147 +1,125 @@
 #include <Arduino.h>
+#include <AltSoftSerial.h>
 #include <SoftwareSerial.h>
+#include <TinyGPSPlus.h>
 
-// MarcoPolo Phase 1 - Hider two-way LoRa heartbeat test
+// MarcoPolo GPS Hider
 //
-// Wiring for the EBYTE E32 module:
+// E32 LoRa wiring:
 //   E32 TXD -> Arduino D10
-//   Arduino D11 -> voltage divider -> E32 RXD
+//   Arduino D11 -> resistor divider -> E32 RXD
 //   E32 AUX -> Arduino D4
 //   E32 M0  -> GND
 //   E32 M1  -> GND
 //
-// SoftwareSerial pin order is: RX pin, TX pin.
-// D10 receives data from the LoRa module.
-// D11 sends data to the LoRa module.
+// GPS wiring:
+//   GPS VCC -> 5V rail
+//   GPS GND -> GND rail
+//   GPS TX  -> Arduino D8
+//   GPS RX is not connected
+//
+// Serial links:
+//   USB Serial Monitor: 115200 baud
+//   E32 UART:           9600 baud
+//   GPS UART:           9600 baud
 SoftwareSerial loraSerial(10, 11);
+AltSoftSerial gpsSerial;
+TinyGPSPlus gps;
 
 const int LORA_AUX_PIN = 4;
+const unsigned long SEND_INTERVAL_MS = 2000;
+const unsigned long GPS_FIX_MAX_AGE_MS = 5000;
 
-// Both boards use the same 4 second cycle.
-// Hider sends near the start of the cycle.
-// Seeker sends about 2 seconds later.
-const unsigned long CYCLE_MS = 4000;
-const unsigned long MY_TX_OFFSET_MS = 0;
-const unsigned long TX_WINDOW_MS = 250;
+unsigned long lastSendMs = 0;
 
-String incomingPacket = "";
-unsigned long packetNumber = 1;
-unsigned long lastTxCycle = 999999;
-unsigned long lastStatusTime = 0;
-int lastAuxState = HIGH;
-
-String auxStateText() {
-  if (digitalRead(LORA_AUX_PIN) == HIGH) {
-    return "HIGH/READY";
+void readGps() {
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
   }
-
-  return "LOW/BUSY";
 }
 
-void printPacket(String direction, String packet) {
-  Serial.print(direction);
-  Serial.print(": ");
+bool gpsHasFreshFix() {
+  return gps.location.isValid() && gps.location.age() < GPS_FIX_MAX_AGE_MS;
+}
+
+unsigned long gpsSatCount() {
+  if (gps.satellites.isValid()) {
+    return gps.satellites.value();
+  }
+
+  return 0;
+}
+
+double gpsHdop() {
+  if (gps.hdop.isValid()) {
+    return gps.hdop.hdop();
+  }
+
+  return 0.0;
+}
+
+String buildHiderPacket() {
+  bool hasFix = gpsHasFreshFix();
+  unsigned long sats = gpsSatCount();
+
+  if (!hasFix) {
+    return "HIDER,0,0,0," + String(sats) + ",0";
+  }
+
+  return "HIDER,1," + String(gps.location.lat(), 6) +
+         "," + String(gps.location.lng(), 6) +
+         "," + String(sats) +
+         "," + String(gpsHdop(), 2);
+}
+
+void printGpsDebug(String packet) {
+  bool hasFix = gpsHasFreshFix();
+
+  Serial.println("--- MarcoPolo Hider GPS ---");
+  Serial.print("GPS fix status: ");
+  Serial.println(hasFix ? "FIX" : "NOFIX");
+
+  if (hasFix) {
+    Serial.print("Lat/Lon: ");
+    Serial.print(gps.location.lat(), 6);
+    Serial.print(", ");
+    Serial.println(gps.location.lng(), 6);
+  } else {
+    Serial.println("Lat/Lon: 0, 0");
+  }
+
+  Serial.print("GPS sats: ");
+  Serial.println(gpsSatCount());
+  Serial.print("GPS hdop: ");
+  Serial.println(gpsHdop(), 2);
+  Serial.print("E32 AUX: ");
+  Serial.println(digitalRead(LORA_AUX_PIN) == HIGH ? "HIGH/READY" : "LOW/BUSY");
+  Serial.print("Packet sent: ");
   Serial.println(packet);
-}
-
-void readLoRaPackets() {
-  while (loraSerial.available() > 0) {
-    char receivedChar = loraSerial.read();
-
-    if (receivedChar == '\n') {
-      String packet = incomingPacket;
-      packet.trim();
-      incomingPacket = "";
-
-      if (packet.length() > 0) {
-        printPacket("RX", packet);
-      }
-    } else {
-      incomingPacket += receivedChar;
-    }
-
-    if (incomingPacket.length() > 80) {
-      Serial.print("RX buffer cleared: ");
-      Serial.println(incomingPacket);
-      incomingPacket = "";
-    }
-  }
-}
-
-void sendHeartbeat() {
-  // MarcoPolo packet format v1:
-  //   MP1,SOURCE,TYPE,SEQ=n,MS=n,TXP=n,FLAGS=text
-  //
-  // RSSI is not included because the E32 UART module does not expose
-  // per-packet RSSI in transparent serial mode.
-  String packet = "MP1,HIDER01,BEACON,SEQ=" + String(packetNumber) +
-                  ",MS=" + String(millis()) +
-                  ",TXP=20,FLAGS=OK";
-  bool auxWasBusy = false;
-
-  Serial.print("TX AUX before: ");
-  Serial.println(auxStateText());
-
-  loraSerial.println(packet);
-
-  // Watch AUX briefly after sending. A LOW pulse suggests the E32 accepted work.
-  unsigned long watchStart = millis();
-  while (millis() - watchStart < 300) {
-    readLoRaPackets();
-
-    if (digitalRead(LORA_AUX_PIN) == LOW) {
-      auxWasBusy = true;
-    }
-  }
-
-  printPacket("TX", packet);
-  Serial.print("TX AUX after: ");
-  Serial.print(auxStateText());
-  Serial.print(" busy pulse seen: ");
-  Serial.println(auxWasBusy ? "YES" : "NO");
-
-  packetNumber++;
+  Serial.println("---------------------------");
 }
 
 void setup() {
-  Serial.begin(9600);
-  pinMode(LORA_AUX_PIN, INPUT_PULLUP);
-  lastAuxState = digitalRead(LORA_AUX_PIN);
-
+  Serial.begin(115200);
   loraSerial.begin(9600);
+  gpsSerial.begin(9600);
+  pinMode(LORA_AUX_PIN, INPUT_PULLUP);
 
-  Serial.println("MarcoPolo Hider two-way test starting...");
-  Serial.println("Hider TX slot: start of each 4 second cycle.");
-  Serial.println("Listening between Hider TX slots.");
-  Serial.print("AUX pin D4 state: ");
-  Serial.println(auxStateText());
+  Serial.println("MarcoPolo Hider GPS test starting...");
+  Serial.println("Reading GPS on AltSoftSerial RX=D8.");
+  Serial.println("Sending one HIDER GPS packet every 2 seconds.");
 }
 
 void loop() {
-  readLoRaPackets();
-
-  int auxState = digitalRead(LORA_AUX_PIN);
-  if (auxState != lastAuxState) {
-    Serial.print("AUX changed: ");
-    Serial.println(auxStateText());
-    lastAuxState = auxState;
-  }
+  readGps();
 
   unsigned long now = millis();
-  unsigned long cycleNumber = now / CYCLE_MS;
-  unsigned long cyclePosition = now % CYCLE_MS;
+  if (now - lastSendMs >= SEND_INTERVAL_MS) {
+    String packet = buildHiderPacket();
 
-  bool inMyTxWindow = cyclePosition >= MY_TX_OFFSET_MS &&
-                      cyclePosition < (MY_TX_OFFSET_MS + TX_WINDOW_MS);
+    loraSerial.println(packet);
+    printGpsDebug(packet);
 
-  if (inMyTxWindow && cycleNumber != lastTxCycle) {
-    sendHeartbeat();
-    lastTxCycle = cycleNumber;
-  }
-
-  if (now - lastStatusTime >= 5000) {
-    Serial.print("Listening... AUX=");
-    Serial.println(auxStateText());
-    lastStatusTime = now;
+    lastSendMs = now;
   }
 }

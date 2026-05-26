@@ -4,12 +4,31 @@
 
 Phase 1 communication between the two Arduino Uno R3 boards and EBYTE E32-900T20D LoRa modules is working.
 
-The current firmware runs a two-way heartbeat test:
+The current firmware runs a GPS-over-LoRa test:
 
-- Hider transmits `MP1,HIDER01,BEACON,...`
-- Seeker transmits `MP1,SEEKER01,STATUS,...`
-- Both boards listen between transmit slots.
-- AUX diagnostics show `busy pulse seen: YES` when the E32 accepts a UART transmit packet.
+- Hider reads GPS with TinyGPSPlus over AltSoftSerial on Arduino D8.
+- Hider transmits one compact LoRa GPS packet every 2 seconds.
+- Seeker reads its own GPS with TinyGPSPlus over AltSoftSerial on Arduino D8.
+- Seeker receives Hider GPS packets over the E32 LoRa link.
+- Seeker prints both locations to the USB Serial Monitor at 115200 baud.
+
+Current Hider packet format:
+
+```text
+HIDER,<fix>,<lat>,<lon>,<sats>,<hdop>
+```
+
+Example with fix:
+
+```text
+HIDER,1,30.421234,-87.216789,8,1.25
+```
+
+Example without fix:
+
+```text
+HIDER,0,0,0,3,0
+```
 
 ## RSSI Notes
 
