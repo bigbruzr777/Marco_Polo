@@ -10,16 +10,19 @@ Phase 1 proves that two EBYTE E32-900T20D LoRa modules can communicate through t
 
 The current test firmware sends Hider GPS status over LoRa every 2 seconds. The Seeker reads its own GPS and prints both Seeker and Hider locations.
 
+The Hider flashes the onboard Uno LED for 5 seconds at startup so it is easy to identify.
+
 The Hider uses a compact plain ASCII packet:
 
 ```text
-HIDER,1,30.421234,-87.216789,8,1.25
+HIDER,12,1,30.421234,-87.216789,8,1.25
 ```
 
 Fields:
 
 - `HIDER`: packet source
-- `1` or `0`: GPS fix valid flag
+- sequence number
+- `1` or `0`: GPS fix flag
 - latitude
 - longitude
 - satellite count
@@ -28,7 +31,7 @@ Fields:
 If the Hider has no GPS fix yet, it sends:
 
 ```text
-HIDER,0,0,0,3,0
+HIDER,12,0,0,0,3,0
 ```
 
 The E32-900T20D UART module did not accept RSSI-related AT commands during testing, so the Seeker currently prints `rssi=NA`.
@@ -133,32 +136,18 @@ GPS fix status: FIX
 Lat/Lon: 30.421234, -87.216789
 GPS sats: 8
 GPS hdop: 1.25
-Packet sent: HIDER,1,30.421234,-87.216789,8,1.25
+Packet sent: HIDER,12,1,30.421234,-87.216789,8,1.25
 ```
 
-Seeker Serial Monitor:
+Seeker Serial Monitor prints newline-delimited JSON only:
 
-```text
---- MarcoPolo GPS Test ---
-Seeker GPS: FIX
-Seeker Lat/Lon: 30.421000, -87.216500
-Seeker sats: 9
-
-Hider GPS: FIX
-Hider Lat/Lon: 30.421234, -87.216789
-Hider sats: 8
-Hider packet age: 0.5s
-Raw last Hider packet: HIDER,1,30.421234,-87.216789,8,1.25
-rssi=NA
---------------------------
+```json
+{"type":"location","name":"Seeker","device":"SEEKER01","source":"gps","fix":true,"lat":30.421000,"lon":-87.216500,"sats":9,"hdop":1.10,"rssi":null,"seq":0,"age_ms":250,"millis":12000}
+{"type":"location","name":"Hider","device":"HIDER01","source":"lora","fix":true,"lat":30.421234,"lon":-87.216789,"sats":8,"hdop":1.25,"rssi":null,"seq":12,"age_ms":500,"millis":12001}
 ```
 
-With AUX wired to D4, the monitors also print AUX diagnostics:
+Unknown lat/lon/rssi values are printed as JSON `null`.
 
-```text
-AUX pin D4 state: HIGH/READY
-Waiting... AUX=HIGH/READY
-```
 
 ## Troubleshooting Checklist
 

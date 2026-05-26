@@ -28,6 +28,19 @@ const unsigned long SEND_INTERVAL_MS = 2000;
 const unsigned long GPS_FIX_MAX_AGE_MS = 5000;
 
 unsigned long lastSendMs = 0;
+unsigned long packetSeq = 1;
+
+void flashHiderLed() {
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  unsigned long startMs = millis();
+  while (millis() - startMs < 5000) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(250);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(250);
+  }
+}
 
 void readGps() {
   while (gpsSerial.available() > 0) {
@@ -60,10 +73,11 @@ String buildHiderPacket() {
   unsigned long sats = gpsSatCount();
 
   if (!hasFix) {
-    return "HIDER,0,0,0," + String(sats) + ",0";
+    return "HIDER," + String(packetSeq) + ",0,0,0," + String(sats) + ",0";
   }
 
-  return "HIDER,1," + String(gps.location.lat(), 6) +
+  return "HIDER," + String(packetSeq) +
+         ",1," + String(gps.location.lat(), 6) +
          "," + String(gps.location.lng(), 6) +
          "," + String(sats) +
          "," + String(gpsHdop(), 2);
@@ -97,6 +111,8 @@ void printGpsDebug(String packet) {
 }
 
 void setup() {
+  flashHiderLed();
+
   Serial.begin(115200);
   loraSerial.begin(9600);
   gpsSerial.begin(9600);
@@ -116,6 +132,7 @@ void loop() {
 
     loraSerial.println(packet);
     printGpsDebug(packet);
+    packetSeq++;
 
     lastSendMs = now;
   }

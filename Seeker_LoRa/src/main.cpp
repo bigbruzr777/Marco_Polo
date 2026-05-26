@@ -4,38 +4,24 @@
 #include <TinyGPSPlus.h>
 
 // MarcoPolo GPS Seeker.
-// E32:
-//   E32 TXD -> Arduino D10
-//   Arduino D11 -> resistor divider -> E32 RXD
-//   E32 AUX -> Arduino D4
-//   E32 M0  -> GND
-//   E32 M1  -> GND
-// GPS:
-//   GPS VCC -> 5V rail
-//   GPS GND -> GND rail
-//   GPS TX  -> Arduino D8
-//   GPS RX is not connected
-// Serial:
-//   USB Serial Monitor: 115200 baud
-//   E32 UART:           9600 baud
-//   GPS UART:           9600 baud
+// E32: TXD->D10, D11->divider->RXD, AUX->D4, M0/M1->GND.
+// GPS: VCC->5V, GND->GND, TX->D8, RX not connected.
 SoftwareSerial loraSerial(10, 11);
 AltSoftSerial gpsSerial;
 TinyGPSPlus gps;
 
-const int LORA_AUX_PIN = 4;
 const unsigned long STATUS_INTERVAL_MS = 2000;
 const unsigned long GPS_FIX_MAX_AGE_MS = 5000;
 const unsigned long LORA_BUFFER_LIMIT = 90;
 
 String incomingLoRa = "";
-String lastHiderPacket = "none";
 
 bool hiderFixValid = false;
 double hiderLat = 0.0;
 double hiderLon = 0.0;
 unsigned long hiderSats = 0;
 double hiderHdop = 0.0;
+unsigned long hiderSeq = 0;
 unsigned long lastHiderPacketMs = 0;
 unsigned long lastStatusMs = 0;
 
@@ -55,6 +41,10 @@ unsigned long seekerSatCount() {
   }
 
   return 0;
+}
+
+bool seekerHdopValid() {
+  return gps.hdop.isValid();
 }
 
 String csvField(String packet, int fieldNumber) {
@@ -85,14 +75,13 @@ void parseHiderPacket(String packet) {
     return;
   }
 
-  lastHiderPacket = packet;
+  hiderSeq = csvField(packet, 1).toInt();
+  hiderFixValid = csvField(packet, 2).toInt() == 1;
+  hiderLat = csvField(packet, 3).toFloat();
+  hiderLon = csvField(packet, 4).toFloat();
+  hiderSats = csvField(packet, 5).toInt();
+  hiderHdop = csvField(packet, 6).toFloat();
   lastHiderPacketMs = millis();
-
-  hiderFixValid = csvField(packet, 1).toInt() == 1;
-  hiderLat = csvField(packet, 2).toFloat();
-  hiderLon = csvField(packet, 3).toFloat();
-  hiderSats = csvField(packet, 4).toInt();
-  hiderHdop = csvField(packet, 5).toFloat();
 }
 
 void readLoRa() {
@@ -112,60 +101,98 @@ void readLoRa() {
   }
 }
 
-void printLocationLine(bool hasFix, double lat, double lon) {
-  if (hasFix) {
-    Serial.print(lat, 6);
-    Serial.print(", ");
-    Serial.println(lon, 6);
+void printJsonNumberOrNull(bool valid, double value, int decimals) {
+  if (valid) {
+    Serial.print(value, decimals);
   } else {
-    Serial.println("0, 0");
+    Serial.print("null");
   }
 }
 
-void printStatusBlock() {
-  bool seekerFix = seekerGpsHasFreshFix();
-
-  Serial.println("--- MarcoPolo GPS Test ---");
-  Serial.print("Seeker GPS: ");
-  Serial.println(seekerFix ? "FIX" : "NOFIX");
-  Serial.print("Seeker Lat/Lon: ");
-  printLocationLine(seekerFix, gps.location.lat(), gps.location.lng());
-  Serial.print("Seeker sats: ");
-  Serial.println(seekerSatCount());
-  Serial.println();
-
-  Serial.print("Hider GPS: ");
-  Serial.println(hiderFixValid ? "FIX" : "NOFIX");
-  Serial.print("Hider Lat/Lon: ");
-  printLocationLine(hiderFixValid, hiderLat, hiderLon);
-  Serial.print("Hider sats: ");
-  Serial.println(hiderSats);
-
-  Serial.print("Hider packet age: ");
-  if (lastHiderPacketMs > 0) {
-    Serial.print((millis() - lastHiderPacketMs) / 1000.0, 1);
-    Serial.println("s");
+void printJsonUnsignedOrNull(bool valid, unsigned long value) {
+  if (valid) {
+    Serial.print(value);
   } else {
-    Serial.println("NA");
+    Serial.print("null");
   }
+}
 
-  Serial.print("Hider hdop: ");
-  Serial.println(hiderHdop, 2);
-  Serial.print("Raw last Hider packet: ");
-  Serial.println(lastHiderPacket);
-  Serial.println("rssi=NA");
-  Serial.println("--------------------------");
+void printLocationJson(const char *name,
+                       const char *device,
+                       const char *source,
+                       bool fix,
+                       double lat,
+                       double lon,
+                       unsigned long sats,
+                       bool hdopValid,
+                       double hdop,
+                       unsigned long seq,
+                       bool ageValid,
+                       unsigned long ageMs) {
+  Serial.print("{\"type\":\"location\",\"name\":\"");
+  Serial.print(name);
+  Serial.print("\",\"device\":\"");
+  Serial.print(device);
+  Serial.print("\",\"source\":\"");
+  Serial.print(source);
+  Serial.print("\",\"fix\":");
+  Serial.print(fix ? "true" : "false");
+  Serial.print(",\"lat\":");
+  printJsonNumberOrNull(fix, lat, 6);
+  Serial.print(",\"lon\":");
+  printJsonNumberOrNull(fix, lon, 6);
+  Serial.print(",\"sats\":");
+  Serial.print(sats);
+  Serial.print(",\"hdop\":");
+  printJsonNumberOrNull(hdopValid, hdop, 2);
+  Serial.print(",\"rssi\":null,\"seq\":");
+  Serial.print(seq);
+  Serial.print(",\"age_ms\":");
+  printJsonUnsignedOrNull(ageValid, ageMs);
+  Serial.print(",\"millis\":");
+  Serial.print(millis());
+  Serial.println("}");
+}
+
+void printStatusJson() {
+  bool seekerFix = seekerGpsHasFreshFix();
+  bool seekerAgeValid = gps.location.isValid();
+  unsigned long seekerAgeMs = seekerAgeValid ? gps.location.age() : 0;
+
+  printLocationJson("Seeker",
+                    "SEEKER01",
+                    "gps",
+                    seekerFix,
+                    gps.location.lat(),
+                    gps.location.lng(),
+                    seekerSatCount(),
+                    seekerHdopValid(),
+                    gps.hdop.hdop(),
+                    0,
+                    seekerAgeValid,
+                    seekerAgeMs);
+
+  bool hiderSeen = lastHiderPacketMs > 0;
+  unsigned long hiderAgeMs = hiderSeen ? millis() - lastHiderPacketMs : 0;
+
+  printLocationJson("Hider",
+                    "HIDER01",
+                    "lora",
+                    hiderFixValid,
+                    hiderLat,
+                    hiderLon,
+                    hiderSats,
+                    hiderSeen,
+                    hiderHdop,
+                    hiderSeq,
+                    hiderSeen,
+                    hiderAgeMs);
 }
 
 void setup() {
   Serial.begin(115200);
   loraSerial.begin(9600);
   gpsSerial.begin(9600);
-  pinMode(LORA_AUX_PIN, INPUT_PULLUP);
-
-  Serial.println("MarcoPolo Seeker GPS test starting...");
-  Serial.println("Reading Seeker GPS on AltSoftSerial RX=D8.");
-  Serial.println("Listening for HIDER GPS packets on E32 LoRa.");
 }
 
 void loop() {
@@ -174,7 +201,7 @@ void loop() {
 
   unsigned long now = millis();
   if (now - lastStatusMs >= STATUS_INTERVAL_MS) {
-    printStatusBlock();
+    printStatusJson();
     lastStatusMs = now;
   }
 }

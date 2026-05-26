@@ -4,20 +4,27 @@
 
 - Two Arduino Uno boards talk through EBYTE E32-900T20D modules.
 - Hider reads GPS on D8 and sends a LoRa line every 2 seconds.
-- Seeker reads its GPS on D8, receives Hider packets, and prints both positions.
+- Hider flashes the onboard LED for 5 seconds at startup.
+- Seeker reads its GPS on D8, receives Hider packets, and prints JSON lines for Node-RED.
 - USB Serial is 115200. E32 and GPS are 9600.
 
 Hider packet:
 
 ```text
-HIDER,<fix>,<lat>,<lon>,<sats>,<hdop>
+HIDER,<seq>,<fix>,<lat>,<lon>,<sats>,<hdop>
 ```
 
 Examples:
 
 ```text
-HIDER,1,30.421234,-87.216789,8,1.25
-HIDER,0,0,0,3,0
+HIDER,12,1,30.421234,-87.216789,8,1.25
+HIDER,12,0,0,0,3,0
+```
+
+Seeker output is newline-delimited JSON only:
+
+```json
+{"type":"location","name":"Hider","device":"HIDER01","source":"lora","fix":true,"lat":30.421234,"lon":-87.216789,"sats":8,"hdop":1.25,"rssi":null,"seq":12,"age_ms":500,"millis":12001}
 ```
 
 ## Wiring Notes
