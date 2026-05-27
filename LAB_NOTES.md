@@ -44,13 +44,6 @@ GPS:
 - GPS TX -> Arduino D8
 - GPS RX not connected
 
-GPS debug:
-
-- `charsProcessed` increasing means the Arduino is receiving GPS bytes.
-- `sentencesWithFix` increasing means the GPS has produced valid fix sentences.
-- `failedChecksum` increasing quickly can mean noisy serial wiring or wrong baud.
-- `sats=0` and `hdop=99.99` usually means the GPS is talking but has no usable sky fix yet.
-
 ## Voltage Divider Fix
 
 The first E32 RX divider was backwards:
