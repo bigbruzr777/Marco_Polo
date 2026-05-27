@@ -89,6 +89,12 @@ void printGpsDebug(String packet) {
   Serial.println("--- MarcoPolo Hider GPS ---");
   Serial.print("GPS fix status: ");
   Serial.println(hasFix ? "FIX" : "NOFIX");
+  Serial.print("GPS chars/sentences/checksum_fail: ");
+  Serial.print(gps.charsProcessed());
+  Serial.print("/");
+  Serial.print(gps.sentencesWithFix());
+  Serial.print("/");
+  Serial.println(gps.failedChecksum());
 
   if (hasFix) {
     Serial.print("Lat/Lon: ");
