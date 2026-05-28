@@ -6,11 +6,11 @@ MarcoPolo is a low-cost Industry 4.0 asset tracking and recovery prototype. The 
 
 ## Phase 1 Goal
 
-Phase 1 proves that two EBYTE E32-900T20D LoRa modules can communicate through two Arduino Uno R3 boards over serial. The current firmware also adds a first GPS-over-LoRa test.
+Phase 1 proves that two EBYTE E32-900T20D LoRa modules can communicate over serial. The current Hider runs on an Arduino Nano 33 BLE Sense, and the Seeker remains on an Arduino Uno R3.
 
-The current test firmware sends Hider GPS status over LoRa every 2 seconds. The Seeker reads its own GPS and prints both Seeker and Hider locations.
+The current test firmware sends Hider GPS status over LoRa every 2 seconds. The Seeker reads its own GPS and prints JSON lines for Node-RED.
 
-The Hider flashes the onboard Uno LED for 5 seconds at startup so it is easy to identify.
+The Hider flashes the onboard Nano LED for 5 seconds at startup so it is easy to identify.
 
 The Hider uses a compact plain ASCII packet:
 
@@ -40,7 +40,36 @@ This phase does not use TinyML, dashboards, or complex packet parsing.
 
 ## Wiring Summary
 
-Use this wiring on both Arduino Uno boards:
+Nano 33 BLE Sense Hider wiring:
+
+| Connection | Wiring |
+| --- | --- |
+| Battery +5V | breadboard + rail |
+| Battery GND | breadboard - rail |
+| Nano VIN | +5V rail |
+| Nano GND | GND rail |
+| GPS VCC | Nano 3V3 |
+| GPS GND | GND |
+| GPS TX | Nano D0/RX |
+| GPS RX | Not connected |
+| Nano D1/TX | E32 RX |
+| E32 TX | Not connected |
+| E32 VCC | +5V rail |
+| E32 GND | GND rail |
+| E32 M0 | GND |
+| E32 M1 | GND |
+| E32 AUX | Not connected |
+
+The Nano 33 BLE Sense is 3.3V logic only. No resistor divider is needed from Nano D1/TX to E32 RX. The Hider uses `Serial1`: RX D0 receives GPS TX, and TX D1 sends packets to E32 RX.
+
+Physical notes:
+
+- USB points toward the top of the breadboard.
+- D13 is at C8.
+- VIN is at C22.
+- Board bridges the breadboard trench.
+
+Uno Seeker wiring:
 
 | EBYTE E32 Pin | Arduino Uno Pin |
 | --- | --- |
@@ -52,14 +81,14 @@ Use this wiring on both Arduino Uno boards:
 | VCC | Correct module supply voltage |
 | GND | GND |
 
-The code uses `SoftwareSerial loraSerial(10, 11);`.
+The Seeker code uses `SoftwareSerial loraSerial(10, 11);`.
 
 - Arduino D10 is SoftwareSerial RX and receives from E32 TXD.
 - Arduino D11 is SoftwareSerial TX and sends to E32 RXD through a voltage divider.
 - Arduino D4 can read E32 AUX. AUX is HIGH when the module is ready and LOW when it is busy.
 - The E32 serial baud rate is 9600.
 
-GPS wiring on both boards:
+Seeker GPS wiring:
 
 | GPS Pin | Arduino Uno Pin |
 | --- | --- |
@@ -68,20 +97,20 @@ GPS wiring on both boards:
 | TX | D8 |
 | RX | Not connected |
 
-The code uses AltSoftSerial for GPS. On Arduino Uno, AltSoftSerial uses RX on D8 and TX on D9. GPS RX is not used in this phase.
+The Seeker uses AltSoftSerial for GPS. On Arduino Uno, AltSoftSerial uses RX on D8 and TX on D9. GPS RX is not used in this phase.
 
 - USB Serial Monitor baud rate is 115200.
 - GPS baud rate is 9600.
 
 ## Upload the Hider
 
-1. Connect the Hider Arduino Uno to USB.
+1. Connect the Hider Nano 33 BLE Sense to USB.
 2. In VS Code, open the PlatformIO sidebar.
 3. Under `Hider_LoRa`, click `Build`.
 4. Click `Upload`.
 5. Click `Monitor`.
 
-This project is configured for the Hider on `COM7`.
+The Hider PlatformIO target is `nano33ble`. The upload port may change when switching from Uno to Nano.
 
 Command-line option:
 
@@ -89,7 +118,7 @@ Command-line option:
 cd "C:\Users\carre\Documents\School\ISE575\Week 1\MarcoPolo_Wk1\Hider_LoRa"
 pio run
 pio run --target upload
-pio device monitor --baud 9600
+pio device monitor --baud 115200
 ```
 
 ## Upload the Seeker
@@ -108,7 +137,7 @@ Command-line option:
 cd "C:\Users\carre\Documents\School\ISE575\Week 1\MarcoPolo_Wk1\Seeker_LoRa"
 pio run
 pio run --target upload
-pio device monitor --baud 9600
+pio device monitor --baud 115200
 ```
 
 If both Arduino boards are connected at the same time, PlatformIO may need a specific serial port. List ports with:
@@ -121,7 +150,7 @@ Then upload or monitor with the matching port:
 
 ```powershell
 pio run --target upload --upload-port COM3
-pio device monitor --port COM3 --baud 9600
+pio device monitor --port COM3 --baud 115200
 ```
 
 Replace `COM3` with the correct port for that board.
@@ -211,7 +240,9 @@ SQLite Function uses `msg.topic` for the INSERT. See `LAB_NOTES.md` for the full
 
 - Confirm both E32 modules have matching settings and are on the same channel.
 - Confirm both E32 modules are in normal mode: M0 to GND and M1 to GND.
-- Confirm GPS TX goes to Arduino D8.
+- Confirm Hider GPS TX goes to Nano D0/RX.
+- Confirm Hider Nano D1/TX goes to E32 RX.
+- Confirm Seeker GPS TX goes to Uno D8.
 - Confirm GPS VCC, GND, and antenna placement.
 - GPS may take several minutes to get a first fix, especially indoors. `NOFIX` with a satellite count still means GPS serial parsing may be working.
 - Wire AUX to Arduino D4 on both boards and check that it reads `HIGH/READY` most of the time.
@@ -220,7 +251,7 @@ SQLite Function uses `msg.topic` for the INSERT. See `LAB_NOTES.md` for the full
 - Confirm E32 TXD goes to Arduino D10.
 - Confirm Arduino D11 goes through a voltage divider to E32 RXD.
 - Confirm all grounds are connected together.
-- Confirm the Serial Monitor baud rate is 9600.
+- Confirm the Serial Monitor baud rate is 115200.
 - Close all Serial Monitor windows before uploading; Windows allows only one program to use a COM port at a time.
 - If uploading fails with both boards connected, use `pio device list` and select the correct COM port.
 - If the Hider shows `Sent:` messages but the Seeker shows nothing, swap only one variable at a time: wiring, module power, distance between modules, COM port, and E32 channel/settings.

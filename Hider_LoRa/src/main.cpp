@@ -1,29 +1,11 @@
 #include <Arduino.h>
-#include <AltSoftSerial.h>
-#include <SoftwareSerial.h>
 #include <TinyGPSPlus.h>
 
-// MarcoPolo GPS Hider.
-// E32:
-//   E32 TXD -> Arduino D10
-//   Arduino D11 -> resistor divider -> E32 RXD
-//   E32 AUX -> Arduino D4
-//   E32 M0  -> GND
-//   E32 M1  -> GND
-// GPS:
-//   GPS VCC -> 5V rail
-//   GPS GND -> GND rail
-//   GPS TX  -> Arduino D8
-//   GPS RX is not connected
-// Serial:
-//   USB Serial Monitor: 115200 baud
-//   E32 UART:           9600 baud
-//   GPS UART:           9600 baud
-SoftwareSerial loraSerial(10, 11);
-AltSoftSerial gpsSerial;
+// Nano 33 BLE Sense Hider.
+// Serial1 RX D0 <- GPS TX. Serial1 TX D1 -> E32 RX.
+// E32 M0/M1 -> GND. E32 TX and AUX not connected.
 TinyGPSPlus gps;
 
-const int LORA_AUX_PIN = 4;
 const unsigned long SEND_INTERVAL_MS = 2000;
 const unsigned long GPS_FIX_MAX_AGE_MS = 5000;
 
@@ -43,8 +25,8 @@ void flashHiderLed() {
 }
 
 void readGps() {
-  while (gpsSerial.available() > 0) {
-    gps.encode(gpsSerial.read());
+  while (Serial1.available() > 0) {
+    gps.encode(Serial1.read());
   }
 }
 
@@ -65,7 +47,7 @@ double gpsHdop() {
     return gps.hdop.hdop();
   }
 
-  return 0.0;
+  return 99.99;
 }
 
 String buildHiderPacket() {
@@ -73,7 +55,9 @@ String buildHiderPacket() {
   unsigned long sats = gpsSatCount();
 
   if (!hasFix) {
-    return "HIDER," + String(packetSeq) + ",0,0,0," + String(sats) + ",0";
+    return "HIDER," + String(packetSeq) +
+           ",0,0,0," + String(sats) +
+           "," + String(gpsHdop(), 2);
   }
 
   return "HIDER," + String(packetSeq) +
@@ -86,7 +70,7 @@ String buildHiderPacket() {
 void printGpsDebug(String packet) {
   bool hasFix = gpsHasFreshFix();
 
-  Serial.println("--- MarcoPolo Hider GPS ---");
+  Serial.println("--- MarcoPolo Nano Hider GPS ---");
   Serial.print("GPS fix status: ");
   Serial.println(hasFix ? "FIX" : "NOFIX");
   Serial.print("GPS chars/sentences/checksum_fail: ");
@@ -95,6 +79,10 @@ void printGpsDebug(String packet) {
   Serial.print(gps.sentencesWithFix());
   Serial.print("/");
   Serial.println(gps.failedChecksum());
+  Serial.print("GPS sats: ");
+  Serial.println(gpsSatCount());
+  Serial.print("GPS hdop: ");
+  Serial.println(gpsHdop(), 2);
 
   if (hasFix) {
     Serial.print("Lat/Lon: ");
@@ -105,28 +93,19 @@ void printGpsDebug(String packet) {
     Serial.println("Lat/Lon: 0, 0");
   }
 
-  Serial.print("GPS sats: ");
-  Serial.println(gpsSatCount());
-  Serial.print("GPS hdop: ");
-  Serial.println(gpsHdop(), 2);
-  Serial.print("E32 AUX: ");
-  Serial.println(digitalRead(LORA_AUX_PIN) == HIGH ? "HIGH/READY" : "LOW/BUSY");
   Serial.print("Packet sent: ");
   Serial.println(packet);
-  Serial.println("---------------------------");
+  Serial.println("-------------------------------");
 }
 
 void setup() {
   flashHiderLed();
 
   Serial.begin(115200);
-  loraSerial.begin(9600);
-  gpsSerial.begin(9600);
-  pinMode(LORA_AUX_PIN, INPUT_PULLUP);
+  Serial1.begin(9600);
 
-  Serial.println("MarcoPolo Hider GPS test starting...");
-  Serial.println("Reading GPS on AltSoftSerial RX=D8.");
-  Serial.println("Sending one HIDER GPS packet every 2 seconds.");
+  Serial.println("MarcoPolo Nano Hider starting...");
+  Serial.println("GPS RX on D0. E32 TX out on D1.");
 }
 
 void loop() {
@@ -136,7 +115,8 @@ void loop() {
   if (now - lastSendMs >= SEND_INTERVAL_MS) {
     String packet = buildHiderPacket();
 
-    loraSerial.println(packet);
+    Serial1.println(packet);
+    Serial1.flush();
     printGpsDebug(packet);
     packetSeq++;
 

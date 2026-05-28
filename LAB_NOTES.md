@@ -2,10 +2,10 @@
 
 ## Current Status
 
-- Two Arduino Uno boards talk through EBYTE E32-900T20D modules.
-- Hider reads GPS on D8 and sends a LoRa line every 2 seconds.
+- Hider now runs on an Arduino Nano 33 BLE Sense.
+- Hider reads GPS on Serial1 RX D0 and sends LoRa on Serial1 TX D1.
 - Hider flashes the onboard LED for 5 seconds at startup.
-- Seeker reads its GPS on D8, receives Hider packets, and prints JSON lines for Node-RED.
+- Seeker remains on Arduino Uno, reads GPS on D8, receives Hider packets, and prints JSON lines for Node-RED.
 - USB Serial is 115200. E32 and GPS are 9600.
 
 Hider packet:
@@ -29,7 +29,31 @@ Seeker output is newline-delimited JSON only:
 
 ## Wiring Notes
 
-E32:
+Nano 33 BLE Sense Hider:
+
+- USB points toward the top of the breadboard.
+- D13 is at C8.
+- VIN is at C22.
+- Board bridges the breadboard trench.
+- Battery +5V -> + rail.
+- Battery GND -> - rail.
+- Nano VIN -> +5V rail.
+- Nano GND -> GND rail.
+- GPS VCC -> Nano 3V3.
+- GPS GND -> GND.
+- GPS TX -> Nano D0/RX.
+- GPS RX not connected.
+- Nano D1/TX -> E32 RX.
+- E32 TX not connected.
+- E32 VCC -> +5V rail.
+- E32 GND -> GND rail.
+- E32 M0 -> GND.
+- E32 M1 -> GND.
+- E32 AUX not connected.
+
+Nano 33 BLE Sense is 3.3V logic. No divider is needed from Nano D1/TX to E32 RX.
+
+Uno Seeker E32:
 
 - M0 = GND
 - M1 = GND
@@ -37,7 +61,7 @@ E32:
 - Arduino D11 -> divider -> E32 RXD
 - AUX -> Arduino D4
 
-GPS:
+Uno Seeker GPS:
 
 - GPS VCC -> 5V rail
 - GPS GND -> GND rail
@@ -288,6 +312,7 @@ Hider GPS -> E32 LoRa -> Seeker -> USB Serial JSON -> Node-RED -> Worldmap + SQL
 Low-effort links used or useful for this project:
 
 - PlatformIO Arduino Uno board setup: https://docs.platformio.org/en/latest/boards/atmelavr/uno.html
+- PlatformIO Arduino Nano 33 BLE board setup: https://docs.platformio.org/en/latest/boards/nordicnrf52/nano33ble.html
 - Arduino SoftwareSerial: https://docs.arduino.cc/tutorials/communication/SoftwareSerialExample
 - TinyGPSPlus GPS parser: https://github.com/mikalhart/TinyGPSPlus
 - AltSoftSerial GPS serial on Uno D8/D9: https://github.com/PaulStoffregen/AltSoftSerial
