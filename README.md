@@ -148,6 +148,64 @@ Seeker Serial Monitor prints newline-delimited JSON only:
 
 Unknown lat/lon/rssi values are printed as JSON `null`.
 
+## Node-RED Map and SQLite Logging
+
+The Seeker JSON stream can feed Node-RED for live mapping and SQLite logging.
+
+Install these nodes through Manage Palette:
+
+```text
+node-red-node-serialport
+node-red-contrib-web-worldmap
+node-red-node-sqlite
+```
+
+Working flow:
+
+```text
+Serial In
+  -> JSON
+      -> Map Function -> Worldmap
+      -> SQLite Function -> Database -> Debug
+```
+
+Serial In should read the Seeker USB port at 115200 baud and split on newline. The JSON node must convert the payload from string to Object.
+
+Worldmap URL:
+
+```text
+http://localhost:1880/worldmap
+```
+
+SQLite database used for the prototype:
+
+```text
+C:/Users/carre/Documents/School/ISE575/MarcoPolo/marcopolo.db
+```
+
+Table:
+
+```sql
+CREATE TABLE IF NOT EXISTS gps_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  received_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  type TEXT,
+  name TEXT,
+  device TEXT,
+  source TEXT,
+  fix INTEGER,
+  lat REAL,
+  lon REAL,
+  sats INTEGER,
+  hdop REAL,
+  rssi REAL,
+  seq INTEGER,
+  age_ms INTEGER,
+  arduino_millis INTEGER
+);
+```
+
+SQLite Function uses `msg.topic` for the INSERT. See `LAB_NOTES.md` for the full function code and verification queries.
 
 ## Troubleshooting Checklist
 

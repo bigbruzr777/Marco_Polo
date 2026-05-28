@@ -104,6 +104,185 @@ rssi=NA
 
 For hotter/colder later, use packet age, missed packets, GPS distance, or switch to an SPI LoRa radio/library that exposes packet RSSI.
 
+## Node-RED Mapping and SQLite Logging
+
+The Seeker now prints newline-delimited JSON over USB Serial. Node-RED reads that stream, plots live markers, and logs rows into SQLite.
+
+Example Seeker JSON:
+
+```json
+{"type":"location","name":"Hider","device":"HIDER01","source":"lora","fix":true,"lat":30.411094,"lon":-86.715057,"sats":9,"hdop":1.05,"rssi":null,"seq":1349,"age_ms":1702,"millis":40026}
+{"type":"location","name":"Seeker","device":"SEEKER01","source":"gps","fix":true,"lat":30.411111,"lon":-86.715049,"sats":10,"hdop":0.81,"rssi":null,"seq":0,"age_ms":184,"millis":42009}
+```
+
+Installed Node-RED nodes:
+
+```text
+node-red-node-serialport
+node-red-contrib-web-worldmap
+node-red-node-sqlite
+```
+
+Working flow:
+
+```text
+Serial In
+  -> JSON
+      -> Map Function -> Worldmap
+      -> SQLite Function -> Database -> Debug
+```
+
+Serial In reads the Seeker USB serial port at 115200 baud and splits strings by newline. The JSON node converts each line from a string into an object.
+
+Worldmap needs at least:
+
+```text
+name
+lat
+lon
+```
+
+The map is at:
+
+```text
+http://localhost:1880/worldmap
+```
+
+SQLite database:
+
+```text
+C:/Users/carre/Documents/School/ISE575/MarcoPolo/marcopolo.db
+```
+
+Table:
+
+```sql
+CREATE TABLE IF NOT EXISTS gps_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  received_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  type TEXT,
+  name TEXT,
+  device TEXT,
+  source TEXT,
+  fix INTEGER,
+  lat REAL,
+  lon REAL,
+  sats INTEGER,
+  hdop REAL,
+  rssi REAL,
+  seq INTEGER,
+  age_ms INTEGER,
+  arduino_millis INTEGER
+);
+```
+
+Working SQLite Function:
+
+```js
+let p = msg.payload;
+
+if (typeof p === "string") {
+    try {
+        p = JSON.parse(p);
+    } catch (err) {
+        node.warn("Bad JSON: " + msg.payload);
+        return null;
+    }
+}
+
+if (!p || p.type !== "location") {
+    return null;
+}
+
+function sqlString(value) {
+    if (value === null || value === undefined) return "NULL";
+    return "'" + String(value).replace(/'/g, "''") + "'";
+}
+
+function sqlNumber(value) {
+    if (value === null || value === undefined || value === "") return "NULL";
+    return Number(value);
+}
+
+msg.topic = `
+INSERT INTO gps_log (
+  type,
+  name,
+  device,
+  source,
+  fix,
+  lat,
+  lon,
+  sats,
+  hdop,
+  rssi,
+  seq,
+  age_ms,
+  arduino_millis
+) VALUES (
+  ${sqlString(p.type)},
+  ${sqlString(p.name)},
+  ${sqlString(p.device)},
+  ${sqlString(p.source)},
+  ${p.fix ? 1 : 0},
+  ${sqlNumber(p.lat)},
+  ${sqlNumber(p.lon)},
+  ${sqlNumber(p.sats)},
+  ${sqlNumber(p.hdop)},
+  ${sqlNumber(p.rssi)},
+  ${sqlNumber(p.seq)},
+  ${sqlNumber(p.age_ms)},
+  ${sqlNumber(p.millis)}
+);
+`;
+
+return msg;
+```
+
+Database node:
+
+```text
+Database: C:/Users/carre/Documents/School/ISE575/MarcoPolo/marcopolo.db
+SQL source: msg.topic
+```
+
+Useful checks:
+
+```sql
+SELECT COUNT(*) AS total_rows FROM gps_log;
+```
+
+```sql
+SELECT *
+FROM gps_log
+ORDER BY id DESC
+LIMIT 20;
+```
+
+```sql
+SELECT received_at, name, device, source, fix, lat, lon, sats, hdop, seq, age_ms
+FROM gps_log
+ORDER BY id DESC
+LIMIT 20;
+```
+
+Notes:
+
+- Arduino serial must be JSON only.
+- Each object is one `Serial.println()` line.
+- Serial In splits on newline.
+- The JSON node must output an Object before map/database branches.
+- `array[0] [empty]` after an INSERT is normal.
+- Rows with all NULL values mean the INSERT ran but values were not mapped correctly.
+- Direct SQL string generation is fine for this low-rate prototype.
+- Disable extra Debug nodes after testing.
+
+Completed data path:
+
+```text
+Hider GPS -> E32 LoRa -> Seeker -> USB Serial JSON -> Node-RED -> Worldmap + SQLite -> DB Browser
+```
+
 ## Sources
 
 Low-effort links used or useful for this project:
@@ -118,3 +297,6 @@ Low-effort links used or useful for this project:
 - Voltage divider math: https://polluxlabs.io/knowledge/electronics-basics/understanding-voltage-dividers
 - 5V to 3.3V divider example: https://zbotic.in/logic-level-shifter-5v-to-3-3v-and-back-conversion-guide/
 - Future RSSI option, RadioLib SX1276 `getRSSI()`: https://jgromes.github.io/RadioLib/class_s_x1276.html
+- Node-RED Serial node: https://flows.nodered.org/node/node-red-node-serialport
+- Node-RED Worldmap node: https://flows.nodered.org/node/node-red-contrib-web-worldmap
+- Node-RED SQLite node: https://flows.nodered.org/node/node-red-node-sqlite
