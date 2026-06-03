@@ -7,6 +7,7 @@
 - Hider flashes the onboard LED for 5 seconds at startup.
 - Seeker remains on Arduino Uno, reads GPS on D8, receives Hider packets, and prints JSON lines for Node-RED.
 - USB Serial is 115200. E32 and GPS are 9600.
+- Started T-Beam Supreme testing as the next Hider hardware.
 
 Hider packet:
 
@@ -307,6 +308,60 @@ Completed data path:
 Hider GPS -> E32 LoRa -> Seeker -> USB Serial JSON -> Node-RED -> Worldmap + SQLite -> DB Browser
 ```
 
+## T-Beam Supreme Notes
+
+We plugged in the LilyGO T-Beam Supreme and found it as an ESP32-S3 USB serial device on `COM11`.
+
+The first useful test was simple:
+
+- turn on the OLED
+- show `Tag 1`
+- show GPS state
+- show satellite count
+- read onboard GPS
+- send the same old Hider packet shape over LoRa
+
+The OLED is monochrome, not color. It is still good for a small status screen.
+
+Current screen:
+
+```text
+Tag 1
+GPS Fix / GPS No Fix / GPS OFF
+Sat n
+```
+
+The screen is rotated vertical so it reads better on the device.
+
+Working T-Beam pin notes:
+
+- OLED I2C: SDA `17`, SCL `18`
+- OLED address: `0x3D`
+- PMU I2C: SDA `42`, SCL `41`
+- GPS RX: `9`
+- GPS TX: `8`
+- GPS enable: `7`
+- BOOT button: GPIO `0`
+
+The GPS did not work at first because the RX/TX pins were reversed from the LilyGO example. After changing GPS RX to `9`, GPS TX to `8`, and setting GPS enable pin `7` HIGH, GPS data started coming in.
+
+The PMU needed its own I2C bus. The display uses `17/18`, but the PMU uses `42/41`.
+
+The screen did not always light after unplug/replug until we scanned for the OLED and used address `0x3D`. We also forced the display on and set contrast.
+
+BOOT button behavior:
+
+- short press toggles GPS off/on
+- GPS off clears the GPS parser
+- screen shows `GPS OFF`
+- packets still send with no fix
+
+RESET is still just reset.
+
+POWER is still the power button. We set the AXP2101 PMU power-off hold time to 4 seconds. Test this on battery only. With USB plugged in, the board may stay on or wake back up.
+
+The T-Beam SX1262 radio transmitted packets with RadioLib, but the old Uno/E32 Seeker did not receive them. That is probably because the E32 transparent UART module and raw SX1262 RadioLib packet are not the same air format. For now, treat the T-Beam radio as a separate test until we either add an E32 to the T-Beam or build an SX1262 Seeker.
+
 ## Sources
 
 Low-effort links used or useful for this project:
@@ -325,3 +380,8 @@ Low-effort links used or useful for this project:
 - Node-RED Serial node: https://flows.nodered.org/node/node-red-node-serialport
 - Node-RED Worldmap node: https://flows.nodered.org/node/node-red-contrib-web-worldmap
 - Node-RED SQLite node: https://flows.nodered.org/node/node-red-node-sqlite
+- LilyGO T-Beam Supreme docs: https://wiki.lilygo.cc/products/t-beam-series/t-beam-supreme/
+- LilyGO LoRa Series examples: https://github.com/Xinyuan-LilyGO/LilyGo-LoRa-Series
+- U8g2 OLED library: https://github.com/olikraus/u8g2
+- RadioLib SX1262 support: https://jgromes.github.io/RadioLib/class_s_x1262.html
+- XPowersLib PMU library: https://github.com/lewisxhe/XPowersLib

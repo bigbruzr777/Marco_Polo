@@ -38,6 +38,35 @@ The E32-900T20D UART module did not accept RSSI-related AT commands during testi
 
 This phase does not use TinyML, dashboards, or complex packet parsing.
 
+## T-Beam Supreme Hider Test
+
+We also started testing a LilyGO T-Beam Supreme as the next Hider.
+
+Right now this is mostly a screen, GPS, and button test. The T-Beam GPS works, and the small OLED works. The screen is rotated vertical and shows:
+
+```text
+Tag 1
+GPS Fix / GPS No Fix / GPS OFF
+Sat n
+```
+
+The screen is a small monochrome SH1106 OLED. It does not do color. It can still show simple text, icons, battery, GPS, LoRa status, arrows, and a tiny breadcrumb-style map later.
+
+T-Beam notes:
+
+- USB serial is on `COM11` right now.
+- Board target is currently a generic ESP32-S3 PlatformIO target.
+- OLED I2C was found at `0x3D`.
+- Display I2C uses SDA `17`, SCL `18`.
+- PMU I2C uses SDA `42`, SCL `41`.
+- GPS uses RX `9`, TX `8`, and enable pin `7`.
+- BOOT button is GPIO `0`.
+- BOOT now toggles GPS on/off in firmware.
+- RESET stays a normal reset button.
+- POWER stays a PMU power button. Hold it about 4 seconds to turn off when running from battery.
+
+The onboard T-Beam SX1262 LoRa radio can send packets with RadioLib, but it did not talk directly to the existing E32/Uno Seeker. That is probably a radio/framing mismatch. For the old Seeker workflow, the easiest path is still using an E32 module on the Hider side or moving the Seeker to an SX1262 receiver too.
+
 ## Wiring Summary
 
 Nano 33 BLE Sense Hider wiring:
