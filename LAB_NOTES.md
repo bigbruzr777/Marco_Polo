@@ -1,146 +1,194 @@
 # MarcoPolo Lab Notes
 
-## Current Status
+## Current State
 
-- Hider now runs on an Arduino Nano 33 BLE Sense.
-- Hider reads GPS on Serial1 RX D0 and sends LoRa on Serial1 TX D1.
-- Hider flashes the onboard LED for 5 seconds at startup.
-- Seeker remains on Arduino Uno, reads GPS on D8, receives Hider packets, and prints JSON lines for Node-RED.
-- USB Serial is 115200. E32 and GPS are 9600.
-- Started T-Beam Supreme testing as the next Hider hardware.
+We have a working T-Beam prototype.
 
-Hider packet:
+- Hider: LilyGO T-Beam Supreme, usually `COM11`
+- Seeker: regular LilyGO T-Beam SX1276, usually `COM12`
+- Hider GPS works
+- Seeker GPS works
+- Hider sends GPS over LoRa
+- Seeker reads LoRa RSSI
+- Hider advertises BLE as `MP-HIDER01`
+- Seeker uses BLE RSSI when nearby
+- Hider sends a movement alert from its QMI8658 IMU
+- Seeker publishes GPS and LoRa telemetry to the NUC over MQTT
+- Seeker uses a directional 915 MHz antenna for sweep testing
+
+Current data path:
+
+```text
+Hider GPS -> LoRa -> Seeker -> Wi-Fi/MQTT -> NUC Node-RED
+Hider BLE beacon -> Seeker close-range RSSI
+Hider IMU movement -> LoRa ALERT -> Seeker MOTION ALERT line
+```
+
+## Hider
+
+Normal LoRa packet:
 
 ```text
 HIDER,<seq>,<fix>,<lat>,<lon>,<sats>,<hdop>
 ```
 
-Examples:
+Moving packet:
 
 ```text
-HIDER,12,1,30.421234,-87.216789,8,1.25
-HIDER,12,0,0,0,3,0
+HIDER,<seq>,<fix>,<lat>,<lon>,<sats>,<hdop>,ALERT
 ```
 
-Seeker output is newline-delimited JSON only:
+Optional tagged fields are appended without changing the original packet:
+
+```text
+M=0/1
+BV=<battery volts>
+BP=<battery percent>
+UP=<Hider uptime ms>
+```
+
+Live example:
+
+```text
+HIDER,47,1,30.411110,-86.715064,12,0.68,M=0,BV=4.109,BP=93,UP=85713
+```
+
+No GPS fix:
+
+```text
+HIDER,<seq>,0,0,0,<sats>,99.99
+```
+
+Hider screen:
+
+```text
+Tag 1
+GPS Fix / GPS No Fix / GPS OFF
+Sat n
+```
+
+BOOT toggles GPS on/off. RESET resets. POWER is the PMU power button.
+
+## Movement Alert
+
+The Hider uses the QMI8658 IMU. When movement starts, it sends an alert immediately and then sends alert packets once per second. It keeps the alert active for about eight seconds after the last detected movement.
+
+Seeker warning timing:
+
+```text
+Last alert packet was less than 5 seconds ago: fast flash
+Last alert packet was 5-20 seconds ago: solid warning
+No alert for 20 seconds: warning removed
+```
+
+Serial proof on the Hider:
+
+```text
+Motion: ALERT
+Packet: HIDER,...,ALERT
+```
+
+The Seeker shows:
+
+```text
+MOTION ALERT!
+```
+
+The alert flashes on the bottom line without replacing the normal GPS, LoRa, or BLE lock label.
+
+The first motion tests failed because the IMU and LoRa were both assigned to `FSPI`. LoRa setup remapped that SPI peripheral, so the IMU returned zeros even though initialization reported success. The fix was:
+
+```text
+LoRa: FSPI
+QMI8658 IMU: HSPI
+```
+
+After separating the buses, moving the Hider produced real acceleration/gyro values and immediate `HIDER,...,ALERT` packets.
+
+## Seeker
+
+The Seeker prints JSON only during normal operation.
+
+Example:
 
 ```json
-{"type":"location","name":"Hider","device":"HIDER01","source":"lora","fix":true,"lat":30.421234,"lon":-87.216789,"sats":8,"hdop":1.25,"rssi":null,"seq":12,"age_ms":500,"millis":12001}
+{"type":"location","name":"Hider","device":"HIDER01","source":"lora","fix":true,"lat":30.411095,"lon":-86.715012,"sats":12,"hdop":0.95,"rssi":-22.0,"seq":621,"age_ms":1558,"millis":10022}
 ```
 
-## Wiring Notes
-
-Nano 33 BLE Sense Hider:
-
-- USB points toward the top of the breadboard.
-- D13 is at C8.
-- VIN is at C22.
-- Board bridges the breadboard trench.
-- Battery +5V -> + rail.
-- Battery GND -> - rail.
-- Nano VIN -> +5V rail.
-- Nano GND -> GND rail.
-- GPS VCC -> Nano 3V3.
-- GPS GND -> GND.
-- GPS TX -> Nano D0/RX.
-- GPS RX not connected.
-- Nano D1/TX -> E32 RX.
-- E32 TX not connected.
-- E32 VCC -> +5V rail.
-- E32 GND -> GND rail.
-- E32 M0 -> GND.
-- E32 M1 -> GND.
-- E32 AUX not connected.
-
-Nano 33 BLE Sense is 3.3V logic. No divider is needed from Nano D1/TX to E32 RX.
-
-Uno Seeker E32:
-
-- M0 = GND
-- M1 = GND
-- E32 TXD -> Arduino D10
-- Arduino D11 -> divider -> E32 RXD
-- AUX -> Arduino D4
-
-Uno Seeker GPS:
-
-- GPS VCC -> 5V rail
-- GPS GND -> GND rail
-- GPS TX -> Arduino D8
-- GPS RX not connected
-
-## Voltage Divider Fix
-
-The first E32 RX divider was backwards:
+Main screen:
 
 ```text
-D11 -> 2k -> E32 RX
-E32 RX -> 1k -> GND
+GPS Lock / LoRa Lock / BLE Lock / No Lock
+<10 FT / <20 FT / ...
+NORTH / NORTHEAST / EAST / ...
+or FROZEN ... ON FIRE!
+MOTION ALERT!
 ```
 
-That made about 1.67V:
+The display is landscape. When both GPS fixes are valid, it shows the compass bearing from Seeker to Hider. If either fix is missing, it falls back to the heat scale. A heart flashes when a Hider packet arrives.
+
+Bottom button `IO38` switches to screen 2:
 
 ```text
-5V x (1k / (2k + 1k)) = 1.67V
+GPS fix: north-up radar with Seeker in the center and Hider as the target
+No GPS fix: large signal-strength bars for antenna sweeping
 ```
 
-Correct divider:
+The GPS radar is north-up because the regular T-Beam does not provide a reliable stationary compass heading. It shows the correct map bearing without pretending to know which way the user is facing.
+
+## Directional Antenna
+
+No LoRa frequency or packet settings changed. The directional antenna changes how RSSI should be used:
+
+- Keep the antenna upright and use the same polarization for each reading.
+- Point, pause for several packet heartbeats, then compare.
+- Do not react to one brief RSSI jump.
+- Repeat a sweep because reflections can create false peaks indoors.
+
+The first live test after this change still received valid Hider GPS packets. RSSI was about `-57` to `-59 dBm` in the tested direction.
+
+## BLE Handoff
+
+BLE no longer switches on at one threshold crossing.
+
+- Enter BLE after three readings at `-67 dBm` or stronger.
+- Leave BLE after three readings at `-78 dBm` or weaker.
+- BLE `<10 FT`: `-55 dBm` or stronger.
+- BLE `<25 FT`: `-65 dBm` or stronger.
+- Remaining BLE lock: `<50 FT`.
+
+These are starting estimates for indoor use. Walls, body position, antenna orientation, and reflections will affect them.
+
+## Charging Check
+
+The Hider PMU reported:
 
 ```text
-D11 -> 1k -> E32 RX
-E32 RX -> 2k -> GND
+Battery: 79% 4004mV charging=yes
 ```
 
-That makes about 3.33V:
+The Hider battery icon draws a small lightning bolt while charging or powered from USB.
 
-```text
-5V x (2k / (1k + 2k)) = 3.33V
-```
+## Heat Scale
 
-Breadboard fix:
+BLE is treated as the close-range handoff, so once BLE is selected the display starts at WARM.
 
-- D11 jumper to F20
-- 1k from G20 to G26
-- 2k from H26 to right - rail
-- E32 RX at J26
+- ON FIRE!
+- VERY HOT
+- HOT
+- WARM
+- LUKE WARM
+- COOL
+- COLD
+- VERY COLD
+- FROZEN
+- UNK
 
-After the fix, AUX showed transmit activity and the Seeker received packets.
+These labels are still rough. Walking tests should tune them.
 
-## RSSI Notes
+## Node-RED
 
-The current E32-900T20D modules do not give us usable RSSI in this setup.
-
-We tested newer documented commands with M0/M1 HIGH:
-
-```text
-AT+DRSSI=?
-AT+DRSSI=1
-AT+ERSSI=?
-AT+ERSSI=1
-```
-
-Both modules returned ERR. The Seeker module's `AT+HELP=?` response did not list DRSSI or ERSSI.
-
-Current firmware prints:
-
-```text
-rssi=NA
-```
-
-For hotter/colder later, use packet age, missed packets, GPS distance, or switch to an SPI LoRa radio/library that exposes packet RSSI.
-
-## Node-RED Mapping and SQLite Logging
-
-The Seeker now prints newline-delimited JSON over USB Serial. Node-RED reads that stream, plots live markers, and logs rows into SQLite.
-
-Example Seeker JSON:
-
-```json
-{"type":"location","name":"Hider","device":"HIDER01","source":"lora","fix":true,"lat":30.411094,"lon":-86.715057,"sats":9,"hdop":1.05,"rssi":null,"seq":1349,"age_ms":1702,"millis":40026}
-{"type":"location","name":"Seeker","device":"SEEKER01","source":"gps","fix":true,"lat":30.411111,"lon":-86.715049,"sats":10,"hdop":0.81,"rssi":null,"seq":0,"age_ms":184,"millis":42009}
-```
-
-Installed Node-RED nodes:
+Installed nodes:
 
 ```text
 node-red-node-serialport
@@ -151,125 +199,30 @@ node-red-node-sqlite
 Working flow:
 
 ```text
-Serial In
-  -> JSON
-      -> Map Function -> Worldmap
-      -> SQLite Function -> Database -> Debug
+Seeker -> MarcoPolo Wi-Fi -> MQTT -> Node-RED
 ```
 
-Serial In reads the Seeker USB serial port at 115200 baud and splits strings by newline. The JSON node converts each line from a string into an object.
-
-Worldmap needs at least:
+MQTT broker:
 
 ```text
-name
-lat
-lon
+10.42.0.1:1883
+marcopolo/seeker/telemetry
 ```
 
-The map is at:
+The Seeker still prints USB serial JSON at `115200` for bench checks.
+
+The MQTT message keeps the original map fields and adds optional values for:
 
 ```text
-http://localhost:1880/worldmap
+source, mode, ble_rssi
+gps_satellites, gps_hdop, gps_speed_mps, gps_course_deg
+hider_motion, motion_alert
+battery_v, battery_pct
+hider_battery_v, hider_battery_pct
+hider_uptime_ms, packet_seq, packet_age_ms, uptime_ms
 ```
 
-SQLite database:
-
-```text
-C:/Users/carre/Documents/School/ISE575/MarcoPolo/marcopolo.db
-```
-
-Table:
-
-```sql
-CREATE TABLE IF NOT EXISTS gps_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  received_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  type TEXT,
-  name TEXT,
-  device TEXT,
-  source TEXT,
-  fix INTEGER,
-  lat REAL,
-  lon REAL,
-  sats INTEGER,
-  hdop REAL,
-  rssi REAL,
-  seq INTEGER,
-  age_ms INTEGER,
-  arduino_millis INTEGER
-);
-```
-
-Working SQLite Function:
-
-```js
-let p = msg.payload;
-
-if (typeof p === "string") {
-    try {
-        p = JSON.parse(p);
-    } catch (err) {
-        node.warn("Bad JSON: " + msg.payload);
-        return null;
-    }
-}
-
-if (!p || p.type !== "location") {
-    return null;
-}
-
-function sqlString(value) {
-    if (value === null || value === undefined) return "NULL";
-    return "'" + String(value).replace(/'/g, "''") + "'";
-}
-
-function sqlNumber(value) {
-    if (value === null || value === undefined || value === "") return "NULL";
-    return Number(value);
-}
-
-msg.topic = `
-INSERT INTO gps_log (
-  type,
-  name,
-  device,
-  source,
-  fix,
-  lat,
-  lon,
-  sats,
-  hdop,
-  rssi,
-  seq,
-  age_ms,
-  arduino_millis
-) VALUES (
-  ${sqlString(p.type)},
-  ${sqlString(p.name)},
-  ${sqlString(p.device)},
-  ${sqlString(p.source)},
-  ${p.fix ? 1 : 0},
-  ${sqlNumber(p.lat)},
-  ${sqlNumber(p.lon)},
-  ${sqlNumber(p.sats)},
-  ${sqlNumber(p.hdop)},
-  ${sqlNumber(p.rssi)},
-  ${sqlNumber(p.seq)},
-  ${sqlNumber(p.age_ms)},
-  ${sqlNumber(p.millis)}
-);
-`;
-
-return msg;
-```
-
-Database node:
-
-```text
-Database: C:/Users/carre/Documents/School/ISE575/MarcoPolo/marcopolo.db
-SQL source: msg.topic
-```
+PubSubClient uses a `1024` byte buffer for the expanded JSON. Successful publish logging is throttled to once every 10 seconds.
 
 Useful checks:
 
@@ -278,110 +231,104 @@ SELECT COUNT(*) AS total_rows FROM gps_log;
 ```
 
 ```sql
-SELECT *
+SELECT received_at, name, source, fix, lat, lon, sats, hdop, rssi, seq, age_ms
 FROM gps_log
 ORDER BY id DESC
 LIMIT 20;
 ```
 
-```sql
-SELECT received_at, name, device, source, fix, lat, lon, sats, hdop, seq, age_ms
-FROM gps_log
-ORDER BY id DESC
-LIMIT 20;
+## Build Commands
+
+Seeker:
+
+```powershell
+cd "C:\Users\carre\Documents\School\ISE575\Week 1\MarcoPolo_Wk1\Seeker_LoRa"
+C:\Users\carre\.platformio\penv\Scripts\platformio.exe run
+C:\Users\carre\.platformio\penv\Scripts\platformio.exe run --target upload
 ```
 
-Notes:
+Hider:
 
-- Arduino serial must be JSON only.
-- Each object is one `Serial.println()` line.
-- Serial In splits on newline.
-- The JSON node must output an Object before map/database branches.
-- `array[0] [empty]` after an INSERT is normal.
-- Rows with all NULL values mean the INSERT ran but values were not mapped correctly.
-- Direct SQL string generation is fine for this low-rate prototype.
-- Disable extra Debug nodes after testing.
+```powershell
+cd "C:\Users\carre\Documents\School\ISE575\MarcoPolo\Hider_LoRa"
+C:\Users\carre\.platformio\penv\Scripts\platformio.exe run
+C:\Users\carre\.platformio\penv\Scripts\platformio.exe run --target upload
+```
 
-Completed data path:
+Close Node-RED and all serial monitors before uploading.
+
+## Pin Notes
+
+T-Beam Supreme Hider:
+
+- OLED SDA `17`, SCL `18`
+- PMU SDA `42`, SCL `41`
+- GPS RX `9`, TX `8`
+- GPS enable `7`
+- BOOT `0`
+- LoRa CS `10`, DIO1 `1`, RST `5`, BUSY `4`
+- LoRa SCK `12`, MISO `13`, MOSI `11`
+- QMI8658 IMU CS `34`, MOSI `35`, SCK `36`, MISO `37`
+
+Regular T-Beam Seeker:
+
+- GPS RX `34`, TX `12`
+- OLED/PMU SDA `21`, SCL `22`
+- OLED reset `16`
+- LoRa NSS `18`
+- LoRa SCK `5`, MISO `19`, MOSI `27`
+- LoRa RST `23`, DIO0 `26`, DIO1 `33`
+- User button `38`
+
+## E32 Notes
+
+The project started with EBYTE E32-900T20D modules on Arduino boards. That proved the first LoRa link.
+
+Important voltage-divider fix:
 
 ```text
-Hider GPS -> E32 LoRa -> Seeker -> USB Serial JSON -> Node-RED -> Worldmap + SQLite -> DB Browser
+Arduino D11 -> 1k -> E32 RX
+E32 RX -> 2k -> GND
 ```
 
-## T-Beam Supreme Notes
+That gives about `3.33V`. The reversed divider only made about `1.67V`, which was too low.
 
-We plugged in the LilyGO T-Beam Supreme and found it as an ESP32-S3 USB serial device on `COM11`.
-
-The first useful test was simple:
-
-- turn on the OLED
-- show `Tag 1`
-- show GPS state
-- show satellite count
-- read onboard GPS
-- send the same old Hider packet shape over LoRa
-
-The OLED is monochrome, not color. It is still good for a small status screen.
-
-Current screen:
+We also tested:
 
 ```text
-Tag 1
-GPS Fix / GPS No Fix / GPS OFF
-Sat n
+AT+DRSSI=?
+AT+DRSSI=1
+AT+ERSSI=?
+AT+ERSSI=1
 ```
 
-The screen is rotated vertical so it reads better on the device.
+Our E32 modules returned `ERR`, so we moved to T-Beam radios where RadioLib gives packet RSSI.
 
-Working T-Beam pin notes:
+## Next Tests
 
-- OLED I2C: SDA `17`, SCL `18`
-- OLED address: `0x3D`
-- PMU I2C: SDA `42`, SCL `41`
-- GPS RX: `9`
-- GPS TX: `8`
-- GPS enable: `7`
-- BOOT button: GPIO `0`
-
-The GPS did not work at first because the RX/TX pins were reversed from the LilyGO example. After changing GPS RX to `9`, GPS TX to `8`, and setting GPS enable pin `7` HIGH, GPS data started coming in.
-
-The PMU needed its own I2C bus. The display uses `17/18`, but the PMU uses `42/41`.
-
-The screen did not always light after unplug/replug until we scanned for the OLED and used address `0x3D`. We also forced the display on and set contrast.
-
-BOOT button behavior:
-
-- short press toggles GPS off/on
-- GPS off clears the GPS parser
-- screen shows `GPS OFF`
-- packets still send with no fix
-
-RESET is still just reset.
-
-POWER is still the power button. We set the AXP2101 PMU power-off hold time to 4 seconds. Test this on battery only. With USB plugged in, the board may stay on or wake back up.
-
-The T-Beam SX1262 radio transmitted packets with RadioLib, but the old Uno/E32 Seeker did not receive them. That is probably because the E32 transparent UART module and raw SX1262 RadioLib packet are not the same air format. For now, treat the T-Beam radio as a separate test until we either add an E32 to the T-Beam or build an SX1262 Seeker.
+- Sweep the directional antenna in fixed steps and record stable RSSI readings.
+- Check the antenna front/back response outdoors before indoor tests.
+- Move close and confirm BLE handoff feels reasonable.
+- Tune heat labels.
+- Tune movement sensitivity if needed.
+- Confirm SQLite keeps logging Hider and Seeker rows.
+- Decide later whether compass/IMU heading is needed on the Seeker.
 
 ## Sources
 
-Low-effort links used or useful for this project:
-
-- PlatformIO Arduino Uno board setup: https://docs.platformio.org/en/latest/boards/atmelavr/uno.html
-- PlatformIO Arduino Nano 33 BLE board setup: https://docs.platformio.org/en/latest/boards/nordicnrf52/nano33ble.html
-- Arduino SoftwareSerial: https://docs.arduino.cc/tutorials/communication/SoftwareSerialExample
-- TinyGPSPlus GPS parser: https://github.com/mikalhart/TinyGPSPlus
-- AltSoftSerial GPS serial on Uno D8/D9: https://github.com/PaulStoffregen/AltSoftSerial
-- E32-900T20D manual, pins, AUX, modes: https://www.manualslib.com/manual/3752089/Ebyte-E32-900t20d.html
-- E32-900T20D PDF mirror: https://e-gizmo.net/oc/kits%20documents/Wireless%20Modules/E32-900T20D.pdf
-- E32 V8.2 manual with DRSSI/ERSSI commands: https://robu.in/wp-content/uploads/2024/07/E32-xxxT20x-V8.2_UserManual_EN_V1.0.pdf
-- Voltage divider math: https://polluxlabs.io/knowledge/electronics-basics/understanding-voltage-dividers
-- 5V to 3.3V divider example: https://zbotic.in/logic-level-shifter-5v-to-3-3v-and-back-conversion-guide/
-- Future RSSI option, RadioLib SX1276 `getRSSI()`: https://jgromes.github.io/RadioLib/class_s_x1276.html
-- Node-RED Serial node: https://flows.nodered.org/node/node-red-node-serialport
-- Node-RED Worldmap node: https://flows.nodered.org/node/node-red-contrib-web-worldmap
-- Node-RED SQLite node: https://flows.nodered.org/node/node-red-node-sqlite
-- LilyGO T-Beam Supreme docs: https://wiki.lilygo.cc/products/t-beam-series/t-beam-supreme/
-- LilyGO LoRa Series examples: https://github.com/Xinyuan-LilyGO/LilyGo-LoRa-Series
-- U8g2 OLED library: https://github.com/olikraus/u8g2
-- RadioLib SX1262 support: https://jgromes.github.io/RadioLib/class_s_x1262.html
-- XPowersLib PMU library: https://github.com/lewisxhe/XPowersLib
+- LilyGO LoRa examples: https://github.com/Xinyuan-LilyGO/LilyGo-LoRa-Series
+- LilyGO T-Beam: https://lilygo.cc/en-us/products/t-beam
+- T-Beam Supreme docs: https://wiki.lilygo.cc/products/t-beam-series/t-beam-supreme/
+- SensorLib: https://github.com/lewisxhe/SensorLib
+- TinyGPSPlus: https://github.com/mikalhart/TinyGPSPlus
+- RadioLib SX1276: https://jgromes.github.io/RadioLib/class_s_x1276.html
+- RadioLib SX1262: https://jgromes.github.io/RadioLib/class_s_x1262.html
+- U8g2: https://github.com/olikraus/u8g2
+- U8g2 display setup and rotation: https://github.com/olikraus/u8g2/wiki/u8g2setupcpp
+- XPowersLib: https://github.com/lewisxhe/XPowersLib
+- ESP32 BLE Arduino: https://github.com/espressif/arduino-esp32/tree/master/libraries/BLE
+- Node-RED Serial: https://flows.nodered.org/node/node-red-node-serialport
+- Node-RED Worldmap: https://flows.nodered.org/node/node-red-contrib-web-worldmap
+- Node-RED SQLite: https://flows.nodered.org/node/node-red-node-sqlite
+- E32-900T20D manual: https://www.manualslib.com/manual/3752089/Ebyte-E32-900t20d.html
+- E32 V8.2 manual: https://robu.in/wp-content/uploads/2024/07/E32-xxxT20x-V8.2_UserManual_EN_V1.0.pdf
